@@ -39,4 +39,5 @@ test('Sperre nach Fehlversuchen gilt für die echte Adresse, nicht für alle hin
 
 test('tägliche Sicherung liegt in daten/sicherung', function () {
   const f = fs.readdirSync(path.join(DATEN, 'sicherung')); assert.ok(f.some(n => /^staffclean-\d{4}-\d{2}-\d{2}\.sqlite$/.test(n)), f.join(','));
+  assert.ok(fs.existsSync(path.join(DATEN, 'sicherung', 'dateien', 'personal')) && fs.existsSync(path.join(DATEN, 'sicherung', 'dateien', 'fotos')), 'Datei-Sicherung (Fotos, Personaldokumente) fehlt');
 });

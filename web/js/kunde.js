@@ -40,7 +40,7 @@
     inhalt.appendChild(box);
   }
   function anfrage(o) {
-    const morgen = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const morgen = UI.plusTage(UI.heute(), 1);   // Ortszeit (toISOString wäre UTC)
     $('#schubladeInhalt').innerHTML = '<h2>Sonderleistung anfragen</h2><p class="leise">' + esc(o.name) + ' — z. B. Grundreinigung, Glasreinigung, Reinigung nach einer Veranstaltung.</p><label class="feld" style="margin-top:1rem">Was dürfen wir für Sie tun?<textarea id="atext" rows="4"></textarea></label><label class="feld" style="margin-top:.8rem">Wunschtermin<input type="date" id="adatum" min="' + morgen + '" value="' + morgen + '"></label>' +
       '<div style="display:flex;gap:.6rem;margin-top:1.2rem"><button class="knopf" id="asenden">Anfrage senden</button><button class="knopf zweit" id="abbrechen">Abbrechen</button></div>';
     $('#schublade').hidden = false; $('#atext').focus(); $('#abbrechen').onclick = zu;

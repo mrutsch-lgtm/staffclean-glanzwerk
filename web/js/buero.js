@@ -118,18 +118,21 @@
     });
   }
 
-  let objektReiter = 'lv', letztesObjekt = null;   // Reiter bleibt beim Neuladen desselben Objekts, ein anderes Objekt beginnt beim LV
+  let objektReiter = 'akte', letztesObjekt = null;   // Reiter bleibt beim Neuladen desselben Objekts, ein anderes Objekt beginnt bei der Übersicht
   async function objekt(id) {
-    if (String(id) !== String(letztesObjekt)) { objektReiter = 'lv'; letztesObjekt = id; }
-    const o = await holen('/api/objekt?id=' + id);
+    if (String(id) !== String(letztesObjekt)) { objektReiter = 'akte'; letztesObjekt = id; }
+    const [o, kz] = await Promise.all([holen('/api/objekt?id=' + id), holen('/api/objekt/kennzahlen?id=' + id)]);
     kopf((o.kunde ? o.kunde + ' · ' : '') + [o.strasse, o.ort].filter(Boolean).join(', '), esc(o.name) + (o.status !== 'aktiv' ? ' <span class="marke grau" style="vertical-align:middle">ruht</span>' : ''),
       'Reinigungstag ' + TAGE[o.reinigungstag] + ' · Feiertage ' + esc(o.bundesland) + ' · Stempeln ' + (o.lat != null ? 'im Umkreis von ' + (o.radius_m || 150) + ' m' : '<b>ohne Standort (noch nicht gesetzt)</b>') + (o.zugang ? ' · Zugang: ' + esc(o.zugang) : ''),
       '<button class="knopf gold" id="bearbeiten">Objekt bearbeiten</button><a class="knopf hell" href="#tagesplan/' + o.id + '">Tagesplan</a><a class="knopf hell" href="/drucken/qr?objekt=' + o.id + '" target="_blank">QR-Aufkleber drucken</a><button class="knopf hell" id="ruhen">' + (o.status === 'aktiv' ? 'Objekt ruhen lassen' : 'Objekt wieder aktiv') + '</button>');
     $('#bearbeiten').onclick = function () { objektFormular(o); };
     $('#ruhen').onclick = async function () { await holen('/api/objekt/status', { id: o.id, status: o.status === 'aktiv' ? 'ruht' : 'aktiv' }); objekteCache = null; meldung('Status geändert'); route(); };
-    inhalt.innerHTML = reiter([['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['standort', 'Standort & QR'], ['team', 'Team, Mängel, Prüfungen']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
+    // Objektkopf wie in der Sicherheitsplanung: oben alles auf einen Blick, darunter die Details in Reitern
+    inhalt.innerHTML = window.GW_OBJEKT.kopf(o, kz) + reiter([['akte', 'Objektakte'], ['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['team', 'Team, Mängel, Prüfungen'], ['standort', 'Standort & QR'], ['rechnungen', 'Rechnungen (' + kz.rechnungen.length + ')']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
     const bereich = $('#oBereich');
     async function zeigen() {
+      if (objektReiter === 'akte') return window.GW_OBJEKT.akte(o, kz, bereich);
+      if (objektReiter === 'rechnungen') return window.GW_OBJEKT.rechnungen(o, kz, bereich);
       if (objektReiter === 'lv') return lvRaster(o, bereich);
       if (objektReiter === 'woche') return wocheObjekt(o, bereich);
       if (objektReiter === 'kalk') return kalkulation(o, bereich);
@@ -384,108 +387,6 @@
     laden();
   }
 
-  // ================================================================= Abrechnung: Rechnungen, Abruf-Aufträge, Preisbausteine
-  const RSTATUS = { entwurf: ['Entwurf', 'grau'], gestellt: ['gestellt', 'gold'], bezahlt: ['bezahlt', ''], storniert: ['storniert', 'rot'] };
-  const ASTATUS = { angefragt: ['angefragt', 'rot'], 'bestätigt': ['bestätigt', 'gold'], erledigt: ['erledigt', ''], abgerechnet: ['abgerechnet', 'grau'], abgelehnt: ['abgelehnt', 'grau'] };
-  const marke = (m, s) => '<span class="marke ' + (m[s] || [s, 'grau'])[1] + '">' + esc((m[s] || [s])[0]) + '</span>';
-  const vormonat = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); };
-  let abrReiter = 'rechnungen';
-  async function abrechnung() {
-    kopf('Abrechnung', 'Rechnungen, die <span class="akzent">stimmen</span>', 'Wie in der Sicherheitsplanung: Der Abrechnungslauf stellt je Kunde eine Sammelrechnung oder je Objekt eine Rechnung zusammen — pauschal, nach Ist-Stunden aus der Zeiterfassung, mit Preisbausteinen und Sonderleistungen. Gestellte Rechnungen sind nummeriert, unveränderlich und kommen als PDF auf StaffClean-Briefpapier mit eingebetteter ZUGFeRD-Datei (oder als XRechnung). Die Automatik erledigt das jeden Monat selbst.');
-    inhalt.innerHTML = reiter([['rechnungen', 'Rechnungen'], ['automatik', 'Automatik'], ['auftraege', 'Sonderleistungen & Abrufe']], abrReiter, function (r) { abrReiter = r; laden(); }) + '<div id="abBereich"></div>';
-    async function laden() {
-      const b = $('#abBereich');
-      if (abrReiter === 'rechnungen') {
-        const l = await holen('/api/rechnungen');
-        const offen = l.filter(function (r) { return r.status === 'gestellt' && !r.storno_von; }), ueber = offen.filter(function (r) { return r.faellig < heute(); });
-        b.innerHTML = '<div class="karte zeile" style="margin-bottom:1rem;flex-wrap:wrap"><div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap"><label class="feld">Abrechnungsmonat<input type="month" id="abMonat" value="' + vormonat() + '"></label><label style="display:flex;gap:.4rem;align-items:center;font-weight:600;margin-bottom:.55rem"><input type="checkbox" id="abStellen"> gleich stellen</label><button class="knopf" id="abErzeugen">Abrechnungslauf starten</button></div>' +
-          '<div style="display:flex;gap:.4rem;flex-wrap:wrap"><span class="marke gold">' + offen.length + ' offen · ' + euro(offen.reduce(function (a, r) { return a + r.brutto; }, 0)) + '</span>' + (ueber.length ? '<span class="marke rot">' + ueber.length + ' überfällig</span>' : '') + '</div></div>' +
-          (l.length ? '<div class="scroll"><table class="tabelle"><thead><tr><th>Nummer</th><th>Kunde · Objekt</th><th>Zeitraum</th><th style="text-align:right">Brutto</th><th>Fällig</th><th>Status</th></tr></thead><tbody>' + l.map(function (r) {
-            return '<tr style="cursor:pointer" data-re="' + r.id + '"><td><b>' + esc(r.nummer || '—') + '</b>' + (r.storno_von ? ' <span class="marke rot">Storno</span>' : '') + '</td><td>' + esc(r.kunde) + '<br><span class="leise klein">' + esc(r.objekt || 'Sammelrechnung') + '</span></td><td>' + datumDe(r.zeitraum_von) + ' – ' + datumDe(r.zeitraum_bis) + '</td><td style="text-align:right"><b>' + euro(r.brutto) + '</b></td><td' + (r.status === 'gestellt' && !r.storno_von && r.faellig < heute() ? ' style="color:var(--rot);font-weight:700"' : '') + '>' + (r.faellig ? datumDe(r.faellig) : '') + '</td><td>' + marke(RSTATUS, r.status) + '</td></tr>';
-          }).join('') + '</tbody></table></div>' : '<div class="karte leer">Noch keine Rechnung. Monat wählen und Entwürfe erzeugen — Grundlage ist der Monatspreis aus der Kalkulation des Objekts.</div>');
-        $$('[data-re]').forEach(function (z) { z.onclick = function () { location.hash = '#rechnung/' + z.dataset.re; }; });
-        $('#abErzeugen').onclick = async function () {
-          try { const r = await holen('/api/rechnung/lauf', { monat: $('#abMonat').value, stellen: $('#abStellen').checked }); meldung(r.angelegt.length + ' Entwürfe angelegt' + (r.gestellt.length ? ', ' + r.gestellt.length + ' gestellt' : '') + (r.uebersprungen.length ? ', ' + r.uebersprungen.length + ' übersprungen' : ''));
-            if (r.uebersprungen.length) schublade('<h2>Übersprungen</h2><p class="leise">' + r.angelegt.length + ' Entwürfe angelegt' + (r.gestellt.length ? ', ' + r.gestellt.length + ' gestellt' : '') + '. Hier ist etwas offen:</p>' + r.uebersprungen.map(function (u) { return '<div class="hinweis" style="margin-top:.5rem"><b>' + esc(u.objekt) + '</b><br>' + esc(u.grund) + '</div>'; }).join('') + '<div style="margin-top:1rem"><button class="knopf zweit" id="abbrechen">Schließen</button></div>');
-            laden(); } catch (e) { meldung(e.message); }
-        };
-      } else if (abrReiter === 'automatik') {
-        const [e, laeufe] = await Promise.all([holen('/api/einstellungen'), holen('/api/abrechnungslaeufe')]);
-        b.innerHTML = '<div class="raster k2"><div class="karte"><div class="ueberzeile">Automatischer Abrechnungslauf</div><h3>Jeden Monat von selbst</h3><p class="leise klein">Am eingestellten Tag rechnet Glanzwerk den Vormonat ab: je Kunde Sammelrechnung oder je Objekt eine Rechnung. Mit „gleich stellen" bekommen alle vollständigen Rechnungen sofort ihre Nummer; unvollständige bleiben Entwurf und stehen im Protokoll.</p>' +
-          '<div class="formular" style="margin-top:.8rem">' + auswahl('auto_lauf_aktiv', 'Automatik', [['0', 'aus'], ['1', 'an']], e.auto_lauf_aktiv) + feld('auto_lauf_tag', 'am Tag des Monats (1–28)', e.auto_lauf_tag, 'number', ' min="1" max="28"') + auswahl('auto_stellen', 'Rechnungen', [['0', 'nur als Entwurf anlegen (prüfen, dann stellen)'], ['1', 'gleich stellen']], e.auto_stellen) + '</div>' +
-          '<button class="knopf" id="autoSpeichern" style="margin-top:1rem">Speichern</button></div>' +
-          '<div class="karte"><div class="ueberzeile">Protokoll</div><h3>Letzte Abrechnungsläufe</h3>' + (laeufe.length ? '<table class="tabelle" style="margin-top:.5rem"><thead><tr><th>Zeit</th><th>Monat</th><th>Art</th><th style="text-align:right">angelegt</th><th style="text-align:right">gestellt</th><th style="text-align:right">offen</th></tr></thead><tbody>' + laeufe.map(function (l) { return '<tr style="cursor:pointer" data-lauf="' + l.id + '"><td>' + esc(datumDe(l.zeit.slice(0, 10)) + ' ' + l.zeit.slice(11, 16)) + '</td><td>' + esc(l.monat.slice(5) + '/' + l.monat.slice(0, 4)) + '</td><td>' + (l.art === 'auto' ? '<span class="marke gold">Automatik</span>' : '<span class="marke grau">von Hand</span>') + '</td><td style="text-align:right">' + l.angelegt + '</td><td style="text-align:right">' + l.gestellt + '</td><td style="text-align:right">' + ((l.ergebnis.uebersprungen || []).length) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="leise">Noch kein Lauf.</div>') + '</div></div>';
-        $('#autoSpeichern').onclick = async function () { const t = Number($('[name=auto_lauf_tag]', b).value); if (!(t >= 1 && t <= 28)) { meldung('Tag zwischen 1 und 28'); return; } await holen('/api/einstellungen', formDaten(b)); meldung('Automatik gespeichert'); laden(); };
-        $$('[data-lauf]', b).forEach(function (z) { z.onclick = function () { const l = laeufe.find(function (x) { return x.id === Number(z.dataset.lauf); }), g = l.ergebnis;
-          schublade('<h2>Abrechnungslauf ' + esc(l.monat.slice(5) + '/' + l.monat.slice(0, 4)) + '</h2><p class="leise">' + esc(datumDe(l.zeit.slice(0, 10)) + ' ' + l.zeit.slice(11, 16)) + ' · ' + (l.art === 'auto' ? 'Automatik' : 'von Hand') + '</p>' +
-            '<h3 style="margin-top:1rem">Angelegt</h3>' + ((g.angelegt || []).map(function (a) { const s = (g.gestellt || []).find(function (x) { return x.id === a.id; }); return '<div class="zeile" style="padding:.3rem 0"><span>' + esc(a.objekt) + '</span><a class="knopf zweit klein" href="#rechnung/' + a.id + '">' + (s ? esc(s.nummer) : 'Entwurf') + '</a></div>'; }).join('') || '<div class="leise">—</div>') +
-            '<h3 style="margin-top:1rem">Offen</h3>' + ((g.uebersprungen || []).map(function (u) { return '<div class="hinweis" style="margin-top:.4rem"><b>' + esc(u.objekt) + '</b><br>' + esc(u.grund) + '</div>'; }).join('') || '<div class="leise">nichts</div>') +
-            '<div style="margin-top:1rem"><button class="knopf zweit" id="abbrechen">Schließen</button></div>'); }; });
-      } else {
-        const [l, obj] = await Promise.all([holen('/api/auftraege'), objekteListe()]);
-        b.innerHTML = '<div class="zeile" style="margin-bottom:.6rem"><span class="leise">Kundenanfragen aus dem Portal und eigene Sonderleistungen. Erledigt mit Stunden oder Festpreis → landet in der nächsten Rechnung.</span><button class="knopf klein" id="neuAuftrag">+ Sonderleistung</button></div>' +
-          (l.length ? l.map(function (a) {
-            return '<div class="karte zeile" style="margin-bottom:.7rem;flex-wrap:wrap"><div><b>' + esc(a.objekt) + '</b> ' + marke(ASTATUS, a.status) + (a.quelle === 'kunde' ? ' <span class="marke">vom Kunden</span>' : '') + '<div>' + esc(a.text) + '</div><div class="leise klein">' + (a.wunschdatum ? 'Wunsch ' + datumDe(a.wunschdatum) + ' · ' : '') + (a.termin ? 'Termin ' + datumDe(a.termin) + ' · ' : '') + (a.stunden ? String(a.stunden).replace('.', ',') + ' Std. · ' : '') + (a.festpreis != null ? 'Festpreis ' + euro(a.festpreis) + ' · ' : '') + (a.rechnung ? 'Rechnung ' + esc(a.rechnung) + ' · ' : '') + 'angelegt ' + esc(datumDe(a.angelegt_am.slice(0, 10))) + (a.angefragt_von ? ' von ' + esc(a.angefragt_von) : '') + (a.antwort ? '<br>Antwort: ' + esc(a.antwort) : '') + '</div></div>' +
-              '<div style="display:flex;gap:.4rem;flex-wrap:wrap">' + (a.status === 'angefragt' ? '<button class="knopf klein" data-best="' + a.id + '">Bestätigen</button><button class="knopf zweit klein" data-abl="' + a.id + '">Ablehnen</button>' : '') + (a.status === 'bestätigt' || a.status === 'angefragt' ? '<button class="knopf zweit klein" data-erl="' + a.id + '">Erledigt</button>' : '') + '</div></div>';
-          }).join('') : '<div class="karte leer">Keine Sonderleistungen.</div>');
-        const finde = id => l.find(function (a) { return a.id === Number(id); });
-        $('#neuAuftrag').onclick = function () {
-          schublade('<h2>Sonderleistung anlegen</h2><div class="formular" style="margin-top:1rem">' + auswahl('objekt_id', 'Objekt', obj.filter(function (o) { return o.status === 'aktiv'; }).map(function (o) { return [o.id, o.name]; }), '') + feld('text', 'Leistung', '') + feld('wunschdatum', 'Termin', '', 'date') + feld('festpreis', 'Festpreis € netto (leer = nach Stunden)', '', 'number', ' step="0.01"') + '</div>' + knoepfe('Anlegen'), function (w) {
-            $('#speichern', w).onclick = async function () { try { await holen('/api/auftrag', formDaten(w)); schubladeZu(); meldung('Sonderleistung angelegt'); laden(); } catch (e) { meldung(e.message); } };
-          });
-        };
-        $$('[data-best]').forEach(function (k) { k.onclick = async function () {
-          const a = finde(k.dataset.best), ma = await holen('/api/mitarbeiter');
-          schublade('<h2>Anfrage bestätigen</h2><p>' + esc(a.objekt) + ': ' + esc(a.text) + '</p><div class="formular" style="margin-top:1rem">' + feld('termin', 'Termin', a.wunschdatum || '', 'date') + feld('festpreis', 'Festpreis € netto (leer = nach Stunden)', a.festpreis, 'number', ' step="0.01"') + feld('antwort', 'Nachricht an den Kunden (optional)', '') +
-            auswahl('mitarbeiter_id', 'Gleich einplanen (optional)', [['', '— nicht einplanen —']].concat(ma.filter(function (m) { return m.aktiv; }).map(function (m) { return [m.id, m.name]; })), '') + feld('beginn', 'Beginn', '08:00', 'time') + feld('ende', 'Ende', '10:00', 'time') + '</div>' + knoepfe('Bestätigen'), function (w) {
-            $('#speichern', w).onclick = async function () { const d = formDaten(w); d.id = a.id; d.status = 'bestätigt'; if (!d.mitarbeiter_id) { delete d.beginn; delete d.ende; } try { const r = await holen('/api/auftrag', d); schubladeZu(); meldung('Bestätigt' + (r.schicht ? ' und im Dienstplan eingeplant' : '')); laden(); } catch (e) { meldung(e.message); } };
-          });
-        }; });
-        $$('[data-erl]').forEach(function (k) { k.onclick = function () {
-          const a = finde(k.dataset.erl);
-          schublade('<h2>Sonderleistung erledigt</h2><p>' + esc(a.objekt) + ': ' + esc(a.text) + '</p><div class="formular" style="margin-top:1rem">' + feld('datum', 'Erledigt am', a.termin && a.termin < heute() ? a.termin : heute(), 'date', ' max="' + heute() + '"') + feld('stunden', 'Stunden (bei Abrechnung nach Aufwand)', a.stunden, 'number', ' step="0.25"') + feld('festpreis', 'oder Festpreis € netto', a.festpreis, 'number', ' step="0.01"') + '</div>' + knoepfe('Erledigt'), function (w) {
-            $('#speichern', w).onclick = async function () { const d = formDaten(w); d.id = a.id; d.status = 'erledigt'; try { await holen('/api/auftrag', d); schubladeZu(); meldung('Erledigt — kommt in die nächste Rechnung'); laden(); } catch (e) { meldung(e.message); } };
-          });
-        }; });
-        $$('[data-abl]').forEach(function (k) { k.onclick = function () {
-          schublade('<h2>Anfrage ablehnen</h2><div class="formular" style="margin-top:1rem">' + feld('antwort', 'Begründung für den Kunden', '') + '</div>' + knoepfe('Ablehnen'), function (w) {
-            $('#speichern', w).onclick = async function () { try { await holen('/api/auftrag', { id: Number(k.dataset.abl), status: 'abgelehnt', antwort: $('[name=antwort]', w).value }); schubladeZu(); meldung('Abgelehnt'); laden(); } catch (e) { meldung(e.message); } };
-          });
-        }; });
-      }
-    }
-    laden();
-  }
-
-  async function rechnung(id) {
-    const r = await holen('/api/rechnung?id=' + id), entw = r.status === 'entwurf';
-    kopf('Rechnung · ' + r.kunde, (r.nummer ? esc(r.nummer) : 'Entwurf') + ' ' + marke(RSTATUS, r.status), esc(r.objekt || 'Sammelrechnung') + ' · Format ' + esc({ zugferd: 'ZUGFeRD', xrechnung: 'XRechnung', pdf: 'PDF' }[r.rechnungsformat] || 'ZUGFeRD') + ' · Leistungszeitraum ' + datumDe(r.zeitraum_von) + ' – ' + datumDe(r.zeitraum_bis) + (r.datum ? ' · Rechnungsdatum ' + datumDe(r.datum) + ' · fällig ' + datumDe(r.faellig) : '') + (r.bezahlt_am ? ' · bezahlt am ' + datumDe(r.bezahlt_am) : '') + (r.storno_nummer ? ' · Storno zu ' + esc(r.storno_nummer) : '') + (r.storniert_durch ? ' · storniert durch ' + esc(r.storniert_durch) : ''),
-      (entw ? '<button class="knopf gold" id="reStellen">Rechnung stellen</button><button class="knopf hell" id="reLoeschen">Entwurf löschen</button>' : '') +
-      '<a class="knopf hell" id="rePdf" href="/api/rechnung/pdf?id=' + r.id + '" target="_blank">' + (entw ? 'PDF-Vorschau' : 'PDF (ZUGFeRD)') + '</a>' +
-      (r.nummer ? '<a class="knopf hell" id="rePdfLaden" href="/api/rechnung/pdf?download=1&id=' + r.id + '">PDF herunterladen</a>' : '') +
-      (r.nummer ? '<a class="knopf hell" href="/api/rechnung/xrechnung?id=' + r.id + '">XRechnung</a>' : '') +
-      (r.status === 'gestellt' && !r.storno_von ? '<button class="knopf hell" id="reBezahlt">Als bezahlt markieren</button>' : '') + (r.status === 'bezahlt' ? '<button class="knopf hell" id="reOffen">Wieder offen</button>' : '') +
-      ((r.status === 'gestellt' || r.status === 'bezahlt') && !r.storno_von ? '<button class="knopf hell" id="reStorno">Stornieren</button>' : '') + '<a class="knopf hell" href="#abrechnung">Alle Rechnungen</a>');
-    inhalt.innerHTML = (r.luecken.length ? '<div class="alarm">' + ICON.warnung.replace('<svg', '<svg width="22" height="22"') + '<div><b>Vor dem Stellen fehlen Pflichtangaben:</b> ' + r.luecken.map(esc).join(', ') + ' — unter Stammdaten → Einstellungen bzw. beim Kunden eintragen.</div></div>' : '') +
-      '<div class="karte"><div class="scroll" style="box-shadow:none"><table class="tabelle"><thead><tr><th>Pos.</th><th>Leistung</th><th style="text-align:right">Menge</th><th>Einheit</th><th style="text-align:right">Einzelpreis</th><th style="text-align:right">Betrag</th>' + (entw ? '<th></th>' : '') + '</tr></thead><tbody>' +
-      r.positionen.map(function (p, i) { return '<tr><td>' + (i + 1) + '</td><td>' + esc(p.bezeichnung) + '</td><td style="text-align:right">' + String(p.menge).replace('.', ',') + '</td><td>' + esc(p.einheit || '') + '</td><td style="text-align:right">' + euro(p.einzelpreis) + '</td><td style="text-align:right"><b>' + euro(p.betrag) + '</b></td>' + (entw ? '<td style="white-space:nowrap"><button class="knopf zweit klein" data-pos="' + p.id + '">ändern</button> <button class="knopf zweit klein" data-posweg="' + p.id + '">entfernen</button></td>' : '') + '</tr>'; }).join('') +
-      '<tr><td></td><td colspan="4" style="text-align:right">Summe netto</td><td style="text-align:right"><b>' + euro(r.netto) + '</b></td>' + (entw ? '<td></td>' : '') + '</tr><tr><td></td><td colspan="4" style="text-align:right">zzgl. ' + String(r.ust_prozent).replace('.', ',') + ' % Umsatzsteuer</td><td style="text-align:right">' + euro(r.ust) + '</td>' + (entw ? '<td></td>' : '') + '</tr><tr><td></td><td colspan="4" style="text-align:right"><b>Rechnungsbetrag</b></td><td style="text-align:right"><b style="font-size:1.15rem">' + euro(r.brutto) + '</b></td>' + (entw ? '<td></td>' : '') + '</tr></tbody></table></div>' +
-      (entw ? '<button class="knopf zweit klein" id="rePos" style="margin-top:.8rem">+ Position</button>' : '') + '</div>';
-    const posForm = p => schublade('<h2>' + (p.id ? 'Position ändern' : 'Neue Position') + '</h2><div class="formular" style="margin-top:1rem">' + feld('bezeichnung', 'Leistung', p.bezeichnung) + feld('menge', 'Menge', p.menge == null ? 1 : p.menge, 'number', ' step="0.25"') + feld('einheit', 'Einheit', p.einheit || 'Stück') + feld('einzelpreis', 'Einzelpreis € netto', p.einzelpreis, 'number', ' step="0.01"') + '</div>' + knoepfe(), function (w) {
-      $('#speichern', w).onclick = async function () { const d = formDaten(w); d.rechnung_id = r.id; d.id = p.id; try { await holen('/api/rechnung/position', d); schubladeZu(); meldung('Position gespeichert'); rechnung(id); } catch (e) { meldung(e.message); } };
-    });
-    const knopf = (sel, fn) => { const k = $(sel); if (k) k.onclick = fn; };
-    knopf('#rePos', function () { posForm({}); });
-    $$('[data-pos]').forEach(function (k) { k.onclick = function () { posForm(r.positionen.find(function (p) { return p.id === Number(k.dataset.pos); })); }; });
-    $$('[data-posweg]').forEach(function (k) { k.onclick = async function () { await holen('/api/rechnung/position', { rechnung_id: r.id, id: Number(k.dataset.posweg), loeschen: true }); meldung('Position entfernt'); rechnung(id); }; });
-    const aktion = (pfad, frage, text, danach) => async function () { if (frage && !confirm(frage)) return; try { const x = await holen(pfad, { id: r.id }); meldung(text(x)); if (danach) danach(x); else rechnung(id); } catch (e) { meldung(e.message); } };
-    knopf('#reStellen', aktion('/api/rechnung/stellen', 'Rechnung jetzt stellen? Danach ist sie nummeriert und nicht mehr änderbar.', function (x) { return 'Gestellt: ' + x.nummer; }));
-    knopf('#reLoeschen', aktion('/api/rechnung/loeschen', 'Entwurf löschen?', function () { return 'Entwurf gelöscht'; }, function () { location.hash = '#abrechnung'; }));
-    knopf('#reBezahlt', aktion('/api/rechnung/bezahlt', null, function () { return 'Als bezahlt markiert'; }));
-    knopf('#reOffen', async function () { await holen('/api/rechnung/bezahlt', { id: r.id, zurueck: true }); meldung('Wieder offen'); rechnung(id); });
-    knopf('#reStorno', aktion('/api/rechnung/stornieren', 'Rechnung stornieren? Es entsteht eine Stornorechnung mit eigener Nummer.', function (x) { return 'Storniert — Stornorechnung ' + x.nummer; }));
-  }
-
   // Preisbausteine eines Objekts (unter der Kalkulation): Glas je Durchgang, Winterdienst saisonal, Stundensatz für Abrufe
   async function bausteine(o) {
     const w = $('#bausteine'); if (!w) return;
@@ -500,20 +401,6 @@
     $('#neuBaustein').onclick = function () { form({}); };
     $$('[data-bs]', w).forEach(function (k) { k.onclick = function () { form(l.find(function (p) { return p.id === Number(k.dataset.bs); })); }; });
     $$('[data-bsweg]', w).forEach(function (k) { k.onclick = async function () { if (!confirm('Baustein entfernen?')) return; await holen('/api/preisposition', { id: Number(k.dataset.bsweg), loeschen: true }); meldung('Baustein entfernt'); bausteine(o); }; });
-  }
-
-  // ================================================================= Mitarbeiter
-  async function mitarbeiter() {
-    const l = await holen('/api/mitarbeiter');
-    kopf('Mitarbeiter', 'Das <span class="akzent">Team</span>', 'PIN für die App, Sprache, Personalnummer für DATEV, Lohngruppe, Minijob. Ausgeschiedene werden gesperrt, nicht gelöscht.', '<button class="knopf gold" id="neuMa">+ Mitarbeiter</button>');
-    inhalt.innerHTML = '<div class="scroll"><table class="tabelle"><thead><tr><th>Name</th><th>Personalnr.</th><th>Sprache</th><th>Lohngruppe</th><th>Beschäftigung</th><th>App-PIN</th><th></th></tr></thead><tbody>' + l.map(function (m) { return '<tr' + (m.aktiv ? '' : ' style="opacity:.55"') + '><td><b>' + esc(m.name) + '</b>' + (m.aktiv ? '' : ' <span class="marke grau">gesperrt</span>') + '</td><td>' + esc(m.personalnummer || '–') + '</td><td>' + esc(SPRACHEN[m.sprache] || m.sprache) + '</td><td>' + esc(m.lohngruppe || '–') + (m.stundenlohn ? ' · ' + euro(m.stundenlohn) : '') + '</td><td>' + (m.minijob ? '<span class="marke gold">Minijob</span>' : '<span class="marke">sozialversicherungspflichtig</span>') + '</td><td>' + (m.hat_pin ? '<span class="marke">gesetzt</span>' : '<span class="marke rot">fehlt</span>') + '</td><td><button class="knopf zweit klein" data-ma="' + m.id + '">bearbeiten</button></td></tr>'; }).join('') + '</tbody></table></div>';
-    const formular = m => schublade('<h2>' + (m.id ? 'Mitarbeiter bearbeiten' : 'Neuer Mitarbeiter') + '</h2><div class="formular" style="margin-top:1rem">' + feld('name', 'Name', m.name) + feld('telefon', 'Telefon', m.telefon) + feld('personalnummer', 'Personalnummer (DATEV)', m.personalnummer) +
-      auswahl('sprache', 'Sprache der App', Object.keys(SPRACHEN).map(function (k) { return [k, SPRACHEN[k]]; }), m.sprache || 'de') + feld('lohngruppe', 'Lohngruppe', m.lohngruppe || 'LG 1') + feld('stundenlohn', 'Abweichender Stundenlohn (optional)', m.stundenlohn) + feld('wochenstunden', 'Soll-Wochenstunden (optional)', m.wochenstunden) +
-      auswahl('minijob', 'Minijob', [['', 'nein'], ['1', 'ja']], m.minijob ? '1' : '') + feld('pin', m.hat_pin ? 'Neue PIN (leer = bleibt)' : 'PIN für die App (4–8 Ziffern)', '', 'text', ' inputmode="numeric" autocomplete="off"') + (m.id ? auswahl('aktiv', 'Status', [['1', 'aktiv'], ['0', 'gesperrt (ausgeschieden)']], m.aktiv ? '1' : '0') : '') + '</div>' + knoepfe(m.id ? 'Speichern' : 'Anlegen'), function (w) {
-      $('#speichern', w).onclick = async function () { const d = formDaten(w); d.id = m.id; d.minijob = !!d.minijob; if (d.aktiv !== undefined) d.aktiv = d.aktiv === '1'; try { await holen('/api/mitarbeiter', d); schubladeZu(); meldung('Gespeichert'); mitarbeiter(); } catch (e) { meldung(e.message); } };
-    });
-    $('#neuMa').onclick = function () { formular({}); };
-    $$('[data-ma]').forEach(function (b) { b.onclick = function () { formular(l.find(function (m) { return m.id === Number(b.dataset.ma); })); }; });
   }
 
   // ================================================================= Kunden & Zugänge
@@ -594,13 +481,16 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') schubladeZu(); });
   $('#abmelden').onclick = async function () { await holen('/api/abmelden', {}); location.href = '/anmelden'; };
 
-  const ANSICHT = { uebersicht, dienstplan, objekte, objekt, tagesplan, import: lvImport, einsatz, qualitaet, pruefung, zeiten, abrechnung, rechnung, mitarbeiter, kunden, maengel, stammdaten };
+  const ANSICHT = { uebersicht, dienstplan, objekte, objekt, tagesplan, import: lvImport, einsatz, qualitaet, pruefung, zeiten, kunden, maengel, stammdaten };
+  // Bausteine für die Module (Abrechnung, Personal, Objektakte, Kommunikation, Planner) — die melden ihre Ansichten hier an
+  window.GW = { kopf, feld, auswahl, formDaten, knoepfe, reiter, schublade, schubladeZu, objekteListe, euro, std, route, TAGE, SPRACHEN, bausteine, inhalt: inhalt, titel: titel, objekteNeu: function () { objekteCache = null; } };
   async function route() {
     const [v, arg] = (location.hash.slice(1) || 'uebersicht').split('/');
-    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung' }[v] || v;
+    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung', mahnung: 'abrechnung', person: 'mitarbeiter', board: 'planner' }[v] || v;
     $$('#nav a').forEach(function (a) { a.classList.toggle('aktiv', a.dataset.v === nav); });
     schubladeZu();
-    try { await (ANSICHT[v] || uebersicht)(arg); } catch (e) { if (/anmelden/i.test(e.message)) { location.href = '/anmelden'; return; } inhalt.innerHTML = '<div class="karte hinweis">' + esc(e.message) + '</div>'; }
+    const modul = window.GW_ANSICHTEN || {};
+    try { await (modul[v] || ANSICHT[v] || uebersicht)(arg); } catch (e) { if (/anmelden/i.test(e.message)) { location.href = '/anmelden'; return; } inhalt.innerHTML = '<div class="karte hinweis">' + esc(e.message) + '</div>'; }
     window.scrollTo(0, 0);
   }
   (async function () {

@@ -257,3 +257,45 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
   .nav { gap: 0; }
   .nav a { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; }
 }
+
+/* ---------- Kommunikation unten rechts (Büro und App) */
+.komm-knopf { position: fixed; right: 1.2rem; bottom: 1.2rem; width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--gruen-900); color: #fff; box-shadow: var(--schatten-hoch); cursor: pointer; z-index: 38; display: grid; place-items: center; }
+.komm-knopf:hover { background: var(--gruen-800); }
+.komm-zahl { position: absolute; top: -4px; right: -4px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--gold); color: var(--gruen-950); font-size: .75rem; font-weight: 800; display: grid; place-items: center; }
+.komm-zahl.rot { background: var(--rot); color: #fff; }
+.komm-kanal .komm-zahl { position: static; }
+.komm-panel { position: fixed; right: 1.2rem; bottom: 5.4rem; width: min(400px, calc(100vw - 2rem)); height: min(620px, calc(100vh - 7rem)); background: var(--flaeche); border: 1px solid var(--linie); border-radius: var(--radius); box-shadow: var(--schatten-hoch); z-index: 37; display: flex; flex-direction: column; overflow: hidden; }
+.komm-kopf { display: flex; gap: .3rem; align-items: center; padding: .5rem; border-bottom: 1px solid var(--linie); background: var(--grau-50); }
+.komm-kopf button, .komm-kopf a { border: 0; background: none; padding: .45rem .7rem; border-radius: 8px; font: inherit; font-weight: 700; font-size: .9rem; color: var(--text-leise); cursor: pointer; }
+.komm-kopf .aktiv { background: var(--flaeche); color: var(--text); box-shadow: var(--schatten); }
+.komm-inhalt { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+.komm-kanal { display: flex; justify-content: space-between; align-items: center; gap: .6rem; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--linie); background: none; padding: .6rem .8rem; font: inherit; color: inherit; cursor: pointer; }
+.komm-kanal:hover { background: var(--grau-50); }
+.komm-chatkopf { display: flex; gap: .5rem; align-items: center; padding: .5rem .8rem; border-bottom: 1px solid var(--linie); }
+.komm-chatkopf button { border: 0; background: none; font-size: 1.4rem; line-height: 1; cursor: pointer; color: inherit; }
+.komm-verlauf { flex: 1; overflow: auto; padding: .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.komm-blase { max-width: 85%; align-self: flex-start; background: var(--grau-100); padding: .5rem .7rem; border-radius: 14px 14px 14px 4px; font-size: .92rem; }
+.komm-blase.eigen { align-self: flex-end; background: var(--gruen-100); border-radius: 14px 14px 4px 14px; }
+.komm-blase img { margin-top: .4rem; border-radius: 10px; max-height: 220px; }
+.komm-von { font-size: .75rem; font-weight: 800; color: var(--gruen-700); }
+.komm-fuss { font-size: .72rem; color: var(--text-leise); margin-top: .25rem; }
+.komm-system { align-self: center; font-size: .78rem; color: var(--text-leise); background: var(--grau-50); padding: .3rem .7rem; border-radius: 10px; text-align: center; }
+.komm-eingabe { border-top: 1px solid var(--linie); padding: .5rem; display: flex; flex-direction: column; gap: .4rem; }
+.komm-eingabe textarea { flex: 1; resize: none; font: inherit; padding: .45rem .6rem; border: 1px solid var(--linie); border-radius: 10px; background: var(--flaeche); color: inherit; }
+.komm-eingabe select { font: inherit; padding: .35rem; border: 1px solid var(--linie); border-radius: 8px; background: var(--flaeche); color: inherit; }
+.komm-foto { cursor: pointer; font-size: 1.3rem; padding: .3rem; }
+.komm-aufgabe { display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; align-items: center; padding: .6rem .8rem; border-bottom: 1px solid var(--linie); }
+.komm-aufgabe button { border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 0; }
+.komm-aufgabe.fertig b { text-decoration: line-through; opacity: .6; }
+@media (max-width: 600px) { .komm-panel { right: .5rem; left: .5rem; width: auto; bottom: 5rem; height: calc(100vh - 6.5rem); } .komm-knopf { right: .8rem; bottom: .8rem; } }
+@media print { .komm-knopf, .komm-panel { display: none !important; } }
+/* ---------- Planner-Board */
+.board { display: flex; gap: .9rem; overflow-x: auto; padding-bottom: 1rem; align-items: flex-start; }
+.board-spalte { flex: 0 0 290px; background: var(--grau-50); border: 1px solid var(--linie); border-radius: var(--radius); padding: .7rem; }
+.board-spalte.ziel { outline: 2px dashed var(--gruen-600); }
+.board-spaltenkopf { display: flex; gap: .4rem; align-items: center; margin-bottom: .6rem; }
+.board-karten { display: flex; flex-direction: column; gap: .5rem; min-height: 40px; }
+.board-karte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: var(--radius-klein); padding: .6rem .7rem; box-shadow: var(--schatten); cursor: pointer; }
+.board-karte:hover { border-color: var(--gruen-500); }
+.board-karte.fertig b { text-decoration: line-through; opacity: .6; }
+.board-karte.zieht { opacity: .4; }

@@ -319,7 +319,7 @@ async function bueroApi(req, res, p, q, ich) {
       objekte: t.objekte.map(function (o) { return { id: o.id, name: o.name, kunde: o.kunde, ort: o.ort, soll: o.soll, fertig: o.fertig, sollMinuten: o.sollMinuten, raeume: o.raeume.length }; }),
       zahlen: { objekte: db.prepare("SELECT COUNT(*) n FROM objekt WHERE status='aktiv'").get().n, raeume: db.prepare('SELECT COUNT(*) n FROM raum').get().n, mitarbeiter: db.prepare('SELECT COUNT(*) n FROM mitarbeiter WHERE aktiv=1').get().n, maengel: db.prepare("SELECT COUNT(*) n FROM mangel WHERE status = 'offen'").get().n, eingestempelt: db.prepare('SELECT COUNT(*) n FROM zeitbuchung WHERE gehen IS NULL').get().n } });
   }
-  if (p === '/api/objekte') return json(res, 200, db.prepare(`SELECT o.id, o.name, o.strasse, o.ort, o.status, o.monatspreis, k.name kunde,
+  if (p === '/api/objekte') return json(res, 200, db.prepare(`SELECT o.id, o.name, o.strasse, o.ort, o.status, o.monatspreis, o.kunde_id, o.objektnummer, o.objektart, k.name kunde,
       (SELECT COUNT(*) FROM raum r WHERE r.objekt_id = o.id) raeume, (SELECT COUNT(*) FROM lv_position l WHERE l.objekt_id = o.id) positionen
       FROM objekt o LEFT JOIN kunde k ON k.id = o.kunde_id ORDER BY o.name`).all());
   if (p === '/api/objekt' && req.method === 'GET') { const o = objektVoll(q.get('id')); if (!o) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, o); }
@@ -336,6 +336,7 @@ async function bueroApi(req, res, p, q, ich) {
     const sp = Object.keys(akte); if (sp.length) db.prepare('UPDATE objekt SET ' + sp.map(function (s) { return s + ' = ?'; }).join(', ') + ' WHERE id = ?').run(...sp.map(function (s) { return akte[s]; }), id);
     return json(res, 200, { ok: true, id: id });
   }
+  if (p === '/api/objekt/felder') return json(res, 200, { felder: OA.FELDER, gruppen: OA.GRUPPEN });
   // Objektkopf wie in der Sicherheitsplanung: die wichtigsten Zahlen auf einen Blick
   if (p === '/api/objekt/kennzahlen') {
     const o = db.prepare('SELECT * FROM objekt WHERE id = ?').get(Number(q.get('id'))); if (!o) throw new Fehler(404, 'Objekt nicht gefunden');
@@ -808,6 +809,12 @@ function sicherung() {
     const ziel = path.join(ordner, 'staffclean-' + heute() + '.sqlite');
     if (!fs.existsSync(ziel)) { db.exec("VACUUM INTO '" + ziel.replace(/'/g, "''") + "'"); console.log('Sicherung geschrieben: ' + ziel); }
     fs.readdirSync(ordner).filter(function (f) { return /^staffclean-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f); }).sort().reverse().slice(14).forEach(function (f) { fs.unlinkSync(path.join(ordner, f)); });
+    // Dateien (Fotos, Personaldokumente) laufend mitsichern: neue Dateien werden kopiert, nichts wird überschrieben —
+    // eine versehentlich gelöschte Personalakte-Datei bleibt in der Sicherung erhalten
+    [['fotos', FOTOS], ['personal', PERSONAL]].forEach(function (x) {
+      const ziel = path.join(ordner, 'dateien', x[0]); fs.mkdirSync(ziel, { recursive: true });
+      fs.readdirSync(x[1]).forEach(function (f) { const z = path.join(ziel, f); if (!fs.existsSync(z)) fs.copyFileSync(path.join(x[1], f), z); });
+    });
   } catch (e) { console.error('Sicherung fehlgeschlagen:', e.message); }
 }
 if (require.main === module) {

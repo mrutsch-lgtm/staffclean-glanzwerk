@@ -38,8 +38,15 @@ const AUS = process.argv[2] || path.join(__dirname, 'pruefung', 'belege'); fs.mk
   const e4 = AB.entwurf(db, o4, '2026-09'); AB.stellen(db, e4.id);
   const e5 = AB.entwurf(db, o5, '2026-09'); AB.stellen(db, e5.id);
   const e2 = AB.entwurfKunde(db, k2, '2026-09'); AB.stellen(db, e2.id);
+  // 6) freie Rechnung: Betreff, Bestellnummer, Artikel, Nachlass (negative Zeile), Leistungsdatum an einem Tag
+  db.prepare("INSERT INTO artikel (nummer, bezeichnung, beschreibung, einheit, preis) VALUES ('A-100', 'Grundreinigung Teppich', 'Sprühextraktion inkl. Fleckentfernung', 'm²', 3.2)").run();
+  const f6 = AB.frei(db, { kunde_id: k4 === 0 ? 0 : kunde('Kanzlei Beispiel PartG', { nr: 'K-1006' }), von: '2026-09-15', bis: '2026-09-15', betreff: 'Grundreinigung nach Umbau', bestellnummer: 'PO-4711' }).id;
+  AB.artikelUebernehmen(db, f6, 1, 120, 'Sonderleistungen');
+  AB.position(db, { rechnung_id: f6, bezeichnung: 'Anfahrt Sondertermin', menge: 1, einheit: 'pauschal', einzelpreis: 25, gruppe: 'Sonderleistungen' });
+  AB.position(db, { rechnung_id: f6, bezeichnung: 'Nachlass Neukunde', menge: 1, einheit: 'pauschal', einzelpreis: -40 });
+  AB.stellen(db, f6);
   const snr = AB.stornieren(db, e1.id); const s = db.prepare('SELECT id FROM rechnung WHERE nummer = ?').get(snr);
-  for (const [name, id] of [['1_rechnung', e1.id], ['2_sammelrechnung', e2.id], ['3_storno', s.id], ['4_para13b', e4.id], ['5_privat', e5.id]]) {
+  for (const [name, id] of [['1_rechnung', e1.id], ['2_sammelrechnung', e2.id], ['3_storno', s.id], ['4_para13b', e4.id], ['5_privat', e5.id], ['6_frei', f6]]) {
     const r = AB.voll(db, id);
     fs.writeFileSync(path.join(AUS, name + '.pdf'), await PDFR.erzeugen(db, r));
     fs.writeFileSync(path.join(AUS, name + '_xrechnung.xml'), AB.xrechnung(db, id));

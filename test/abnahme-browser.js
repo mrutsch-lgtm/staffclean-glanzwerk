@@ -16,7 +16,8 @@ const DATEN = fs.mkdtempSync(path.join(os.tmpdir(), 'glanzwerk-abnahme-'));
 const protokoll = [], fehler = []; let erlaubt = 0, schritte = 0;
 const ok = t => { schritte++; protokoll.push('✓ ' + t); };
 const erwartet = n => { erlaubt += n || 1; };   // die nächsten n Fehlerantworten sind Absicht (Falscheingabe, Geofence …)
-const plus = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+// Ortszeit wie der Server (toISOString allein ist UTC — zwischen 0 und 2 Uhr läge das Datum einen Tag daneben)
+const plus = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 
 let letzteSeite = null;
 async function beobachten(seite, name) {
@@ -99,6 +100,9 @@ async function buero1(b) {
   const kid = await s.locator('#schublade [name=kunde_id] option', { hasText: 'Testkunde' }).getAttribute('value');
   await schublade(s, { name: 'Abnahme-Objekt Kiel', kunde_id: kid, strasse: 'Prüfweg 1', plz: '24103', ort: 'Kiel', bundesland: 'SH', reinigungstag: '2' });
   await s.waitForURL(/#objekt\/\d+/); const oid = s.url().split('/').pop(); ok('Objekt angelegt → Objektseite ' + oid);
+  // Objekt öffnet mit Objektkopf und Objektakte, das LV ist ein Reiter
+  if (!(await s.locator('.kennzahl').count())) throw new Error('Objektkopf mit Kennzahlen fehlt'); ok('Objektkopf mit Kennzahlen');
+  await klick(s, '[data-reiter="lv"]', 'Reiter Leistungsverzeichnis');
   // LV
   await klick(s, '#neuRaum', '+ Raum'); await schublade(s, { name: 'Flur', etage: 'EG', belag: 'PVC', flaeche_m2: '30' }); await meldungIst(s, /Raum gespeichert/, 'Raum Flur');
   await klick(s, '#neuRaum', '+ Raum'); await schublade(s, { name: 'Büro 1', etage: 'EG', belag: 'Teppich', flaeche_m2: '20' }); await meldungIst(s, /Raum gespeichert/, 'Raum Büro 1');
@@ -179,7 +183,7 @@ async function buero1(b) {
   const vt = await s.textContent('#vorschau');
   if (!/Prüfallee 12a/.test(vt) || !/Kürzel „m2" laut Legende als „14T"/.test(vt) || !/als Raumfläche übernommen/.test(vt) || /Erdgeschoss<|Summe/.test(await s.innerHTML('#vorschau table'))) throw new Error('Wettbewerber-LV falsch gelesen: ' + vt.slice(0, 300));
   ok('Wettbewerber-LV: Räume in Spalte 2, m² als Fläche, Legende übersetzt m2 → 14T'); await bild(s, 'b12b-import-wettbewerber');
-  await s.click('#uebernehmen'); await s.waitForURL(/#objekt\/\d+/); await ruhig(s);
+  await s.click('#uebernehmen'); await s.waitForURL(/#objekt\/\d+/); await ruhig(s); await klick(s, '[data-reiter="lv"]', 'Reiter Leistungsverzeichnis');
   const rt = await s.textContent('#inhalt'); if (!/30,47 m²/.test(rt)) throw new Error('Fläche nicht am Raum: ' + rt.slice(0, 400)); ok('Fläche 30,47 m² am Raum');
   await s.locator('[data-raum-edit]').first().click(); await schublade(s, { anzahl: '3' }); await meldungIst(s, /Raum gespeichert/, 'Anzahl 3 Etagen am Raum');
   if (!/× 3/.test(await s.textContent('#inhalt'))) throw new Error('Anzahl nicht im Raster'); ok('Raster zeigt „× 3"');
@@ -195,9 +199,30 @@ async function buero1(b) {
   await klick(s, '#nav a[data-v=qualitaet]', 'Qualität öffnen'); await klick(s, '[data-pr]', 'Prüfung aus Liste öffnen'); await s.goto(URL0 + '/#qualitaet'); await ruhig(s);
   await klick(s, '#qStart', 'Prüfung starten (Demo-Objekt)'); await s.waitForURL(/#pruefung\//); await bild(s, 'b14-qualitaet');
   // Mitarbeiter
-  await klick(s, '#nav a[data-v=mitarbeiter]', 'Mitarbeiter öffnen'); await klick(s, '#neuMa', '+ Mitarbeiter');
-  await schublade(s, { name: 'Test Kraft', personalnummer: '1003', sprache: 'ro', minijob: '1', pin: '4321' }, '#speichern'); await meldungIst(s, /Gespeichert/, 'Mitarbeiter mit PIN anlegen');
-  erwartet(); await klick(s, '[data-ma]', 'Mitarbeiter bearbeiten'); await schublade(s, { pin: '12' }, '#speichern'); await meldungIst(s, /4 bis 8/, 'zu kurze PIN wird abgelehnt'); await s.click('#schublade #abbrechen');
+  // Personal: Liste, neue Kraft, Personalakte (Prüfziffern), Dokumente, Abwesenheit, Einsätze, App-Zugang, Auswertungen
+  await klick(s, '#nav a[data-v=mitarbeiter]', 'Personal öffnen'); await klick(s, '#neuMa', '+ Mitarbeiter');
+  await schublade(s, { vorname: 'Test', nachname: 'Kraft', sprache: 'ro', pin: '4321' }, '#speichern'); await meldungIst(s, /Angelegt/, 'Mitarbeiter mit PIN anlegen');
+  await s.waitForURL(/#person\/\d+/); await ruhig(s); ok('Personalakte geöffnet');
+  if (!/Für die Anmeldung beim Lohnbüro fehlen/.test(await s.textContent('#inhalt'))) throw new Error('Lückenhinweis fehlt'); ok('Akte zeigt fehlende Pflichtangaben');
+  erwartet(); await klick(s, '#paZugang', 'App-Zugang & Lohn'); await schublade(s, { personalnummer: '1003', pin: '12' }, '#speichern'); await meldungIst(s, /4 bis 8/, 'zu kurze PIN wird abgelehnt');
+  await s.fill('#schublade [name=pin]', ''); await s.click('#schublade #speichern'); await ruhig(s); await meldungIst(s, /Gespeichert/, 'Personalnummer gespeichert');
+  erwartet(); await s.fill('#paBereich [name=steuer_id]', '12345678901'); await klick(s, '#paSpeichern', 'Akte mit falscher Steuer-ID'); await meldungIst(s, /Prüfziffer|Steuer-ID/, 'falsche Steuer-ID abgelehnt');
+  const akte = { geburtsdatum: '1939-08-17', geburtsort: 'Kiel', staatsangehoerigkeit: 'deutsch', strasse: 'Prüfweg 1', plz: '24534', ort: 'Neumünster', eintritt: plus(-30), steuer_id: '86095742719', sv_nummer: '65170839K004', krankenkasse: 'AOK', iban: 'DE02120300000000202051', urlaubsanspruch: '26', notfall_name: 'Partner', notfall_telefon: '0170 000' };
+  for (const [n, v] of Object.entries(akte)) await s.fill('#paBereich [name=' + n + ']', v);
+  await s.selectOption('#paBereich [name=geschlecht]', 'w'); await s.selectOption('#paBereich [name=beschaeftigungsart]', 'minijob'); await s.selectOption('#paBereich [name=aufenthaltstitel]', 'deutsch');
+  await klick(s, '#paSpeichern', 'Personalakte speichern'); await meldungIst(s, /Gespeichert/, 'Personalakte gespeichert');
+  await klick(s, '[data-reiter=dokumente]', 'Reiter Dokumente'); const pdfDatei = path.join(DATEN, 'vertrag.pdf'); fs.writeFileSync(pdfDatei, '%PDF-1.4\n%Abnahme\n');
+  await s.setInputFiles('#paDatei', pdfDatei); await klick(s, '#paHoch', 'Dokument hochladen'); await meldungIst(s, /Dokument abgelegt/, 'Vertrag in der Akte');
+  await klick(s, '[data-reiter=dokumente]', 'Reiter Dokumente'); await klick(s, '[data-dokweg]', 'Dokument entfernen'); await meldungIst(s, /Entfernt/, 'Dokument entfernt');
+  await klick(s, '[data-reiter=abwesenheit]', 'Reiter Urlaub & Abwesenheit'); await klick(s, '#paAbw', 'Urlaub eintragen'); await meldungIst(s, /Eingetragen/, 'Urlaub eingetragen');
+  await klick(s, '[data-reiter=abwesenheit]', 'Reiter Urlaub & Abwesenheit'); await klick(s, '[data-abwweg]', 'Abwesenheit entfernen'); await meldungIst(s, /Entfernt/, 'Abwesenheit entfernt');
+  await klick(s, '[data-reiter=einsatz]', 'Reiter Einsätze');
+  await klick(s, '#paNachricht', 'Nachricht an die Kraft'); await s.locator('#kommPanel').waitFor({ state: 'visible' }); await s.fill('#kommText', 'Willkommen im Team (Abnahme)'); await klick(s, '#kommSenden', 'Direktnachricht senden');
+  if (!/Willkommen im Team/.test(await s.textContent('#kommVerlauf'))) throw new Error('Direktnachricht nicht im Verlauf'); ok('Direktnachricht im Verlauf'); await s.click('#kommZu');
+  await bild(s, 'b15-personalakte');
+  await klick(s, '#nav a[data-v=mitarbeiter]', 'Personal-Liste'); await s.fill('#pSuche', 'Kraft'); await ruhig(s); ok('Personal durchsuchen'); await s.selectOption('#pStatus', 'alle'); await ruhig(s); ok('Status-Filter');
+  await klick(s, '[data-reiter=fristen]', 'Fristen & Lücken'); await klick(s, '[data-reiter=auswertung]', 'Monatsauswertung'); await s.locator('#awTabelle table').waitFor(); ok('Monatsauswertung mit Tabelle');
+  await klick(s, '#awCsv', 'Auswertung als CSV'); await klick(s, '[data-reiter=urlaub]', 'Urlaubskonten'); await klick(s, '[data-person]', 'Akte aus Urlaubskonto öffnen'); await s.waitForURL(/#person\//); ok('Personalakte über Liste');
   await bild(s, 'b15-mitarbeiter');
   // Stammdaten
   await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten öffnen');
@@ -288,7 +313,7 @@ async function abrechnen(b) {
   // Stundensatz fehlt noch → Hinweis beim Erzeugen; danach eintragen
   await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen'); await s.fill('[name=stundensatz_abruf]', '35'); await klick(s, '#eSpeichern', 'Stundensatz 35 € speichern'); await meldungIst(s, /gespeichert/, 'Stundensatz gespeichert');
   // Entwürfe für den laufenden Monat
-  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen'); await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erzeugen');
+  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=uebersicht]', 'Reiter Rechnungen'); await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erzeugen');
   await meldungIst(s, /Entwürfe angelegt/, 'Entwürfe erzeugt'); if (await s.locator('#schublade').isVisible()) { ok('Übersprungene Objekte mit Grund angezeigt'); await s.click('#schublade #abbrechen'); }
   await s.locator('tr[data-re]', { hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   let t = await s.textContent('#inhalt');
@@ -329,8 +354,8 @@ async function abrechnen(b) {
   await s.locator('tr[data-re]', { hasText: 'RE-' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).filter({ hasText: '0003' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   if (!/Grundreinigung Flur/.test(await s.textContent('#inhalt'))) throw new Error('Sonderleistung nach Storno nicht wieder abgerechnet'); ok('nach Storno: Sonderleistung in RE-…-0003, direkt gestellt');
   // Entwurf löschen: Entwurf für den Vormonat anlegen und wieder verwerfen
-  await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen');
-  const vm = new Date(); vm.setDate(1); vm.setMonth(vm.getMonth() - 1); await s.fill('#abMonat', vm.toISOString().slice(0, 7));
+  await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); await klick(s, '[data-reiter=uebersicht]', 'Reiter Rechnungen');
+  const vm = new Date(); vm.setDate(1); vm.setMonth(vm.getMonth() - 1); await s.fill('#abMonat', vm.getFullYear() + '-' + String(vm.getMonth() + 1).padStart(2, '0'));
   await klick(s, '#abErzeugen', 'Entwürfe für den Vormonat'); await meldungIst(s, /Entwürfe angelegt/, 'Vormonats-Entwurf'); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen');
   await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   await klick(s, '#reLoeschen', 'Entwurf löschen'); await meldungIst(s, /Entwurf gelöscht/, 'Entwurf gelöscht'); await s.waitForURL(/#abrechnung$/);
@@ -384,6 +409,116 @@ async function buero2(b) {
   await ctx.close();
 }
 
+
+// Erweiterung 28.09.2026: Rechnung frei erstellen, Zahlungen, Mahnwesen, Artikel, Einstellungen, Objektakte, Planner, Chat
+async function wahlText(s, sel, muster) {
+  const v = await s.$$eval(sel + ' option', (o, m) => { const x = o.find(e => new RegExp(m).test(e.textContent)); return x ? x.value : null; }, muster);
+  if (v == null) throw new Error('Auswahl „' + muster + '" fehlt in ' + sel); await s.selectOption(sel, v); await ruhig(s);
+}
+function datenbank() { const { DatabaseSync } = require('node:sqlite'); return new DatabaseSync(path.join(DATEN, 'staffclean.sqlite')); }
+async function textDa(s, sel, muster, fehlertext) { for (let i = 0; i < 50; i++) { const t = await s.textContent(sel).catch(() => ''); if (muster.test(t || '')) return; await s.waitForTimeout(200); } throw new Error(fehlertext + ': ' + String(await s.textContent(sel).catch(() => '')).slice(0, 200)); }
+async function schubladeZu(s) { await s.waitForTimeout(450); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen'); }
+
+async function erweiterung(b) {
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Erweiterung');
+  await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
+  // Artikelstamm
+  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=artikel]', 'Reiter Artikel & Leistungen');
+  await klick(s, '#neuArtikel', '+ Artikel'); await schublade(s, { nummer: 'A-100', bezeichnung: 'Grundreinigung Teppich', beschreibung: 'Sprühextraktion inkl. Fleckentfernung', einheit: 'm²', preis: '3.20' }); await meldungIst(s, /Artikel gespeichert/, 'Artikel angelegt');
+  await klick(s, '#neuArtikel', '+ zweiter Artikel'); await schublade(s, { bezeichnung: 'Alt-Artikel', einheit: 'Std.', preis: '30' }); await meldungIst(s, /Artikel gespeichert/, 'zweiter Artikel');
+  await s.locator('tr', { hasText: 'Alt-Artikel' }).locator('[data-art]').click(); await schublade(s, { preis: '31.50' }); await meldungIst(s, /Artikel gespeichert/, 'Artikel ändern');
+  await s.locator('tr', { hasText: 'Alt-Artikel' }).locator('[data-artweg]').click(); await meldungIst(s, /deaktiviert/, 'Artikel deaktivieren');
+  // Neue Rechnung frei erstellen
+  await klick(s, '#neuRechnung', '+ Neue Rechnung'); await wahlText(s, '#schublade [name=kunde_id]', 'Testkunde Abnahme');
+  await s.fill('#schublade [name=betreff]', 'Sonderreinigung Abnahme'); await s.fill('#schublade [name=bestellnummer]', 'PO-ABN-1');
+  await s.locator('[data-nrobj]').first().check(); ok('Objekt für die Übernahme gewählt'); await s.click('#schublade #speichern'); await ruhig(s);
+  await meldungIst(s, /Entwurf angelegt/, 'freie Rechnung angelegt'); await s.waitForURL(/#rechnung\/\d+/); await schubladeZu(s);
+  const rid = s.url().split('/').pop();
+  await klick(s, '#rePos', '+ Position'); await schublade(s, { bezeichnung: 'Anfahrt Sondertermin', menge: '1', einheit: 'pauschal', einzelpreis: '25', gruppe: 'Sonderleistungen' }); await meldungIst(s, /Position gespeichert/, 'freie Position mit Zwischenüberschrift');
+  await klick(s, '#reArtikel', '+ Artikel'); await schublade(s, { menge: '40', gruppe: 'Sonderleistungen' }, '#speichern'); await meldungIst(s, /Artikel hinzugefügt/, 'Artikel in die Rechnung');
+  await klick(s, '#reObjekt', '+ Leistungen eines Objekts'); await s.click('#schublade #speichern'); await ruhig(s); await meldungIst(s, /schon|übernommen|nichts/, 'Objekt nicht doppelt übernommen');
+  await klick(s, '#reNachlass', '+ Nachlass'); await schublade(s, { einzelpreis: '10' }); await meldungIst(s, /Position gespeichert/, 'Nachlass');
+  if (!/–10,00|-10,00/.test(await s.textContent('#inhalt'))) throw new Error('Nachlass nicht negativ'); ok('Nachlass wird abgezogen');
+  await klick(s, '#reGruppe', '+ Zwischenüberschrift'); if (!/Abnahme-Bemerkung/.test(await s.textContent('#inhalt'))) throw new Error('Zwischenüberschrift nicht aktiv'); ok('Zwischenüberschrift für neue Positionen aktiv');
+  await klick(s, '#reGruppeAus', 'Zwischenüberschrift aufheben');
+  const vorher = await s.locator('[data-pos]').evaluateAll(l => l.map(e => e.dataset.pos));
+  await s.locator('[data-runter]').first().click(); await ruhig(s); const nachher = await s.locator('[data-pos]').evaluateAll(l => l.map(e => e.dataset.pos));
+  if (vorher[0] === nachher[0]) throw new Error('Position nicht verschoben'); ok('Position nach unten'); await s.locator('[data-hoch]').nth(1).click(); await ruhig(s); ok('Position nach oben');
+  await klick(s, '#reKopf', 'Kopfdaten & Texte'); await schublade(s, { betreff: 'Sonderreinigung Abnahme Teppich', zahlungsziel_tage: '21', einleitung: 'Sehr geehrte Frau Prüf,\nanbei unsere Rechnung.' }); await meldungIst(s, /Gespeichert/, 'Kopfdaten gespeichert');
+  if (!/21 Tage \(an der Rechnung\)/.test(await s.textContent('#inhalt'))) throw new Error('Zahlungsziel nicht übernommen'); ok('Zahlungsziel an der Rechnung');
+  await klick(s, '#reStellen', 'freie Rechnung stellen'); await meldungIst(s, /Gestellt: RE-/, 'freie Rechnung gestellt'); await bild(s, 'b27-freie-rechnung');
+  const nr = (await s.textContent('#titel')).match(/RE-\d{4}-\d{4}/)[0];
+  const x = await s.request.get(URL0 + '/api/rechnung/xrechnung?id=' + rid); if (!/PO-ABN-1/.test(await x.text())) throw new Error('Bestellnummer fehlt in der XRechnung'); ok('Bestellnummer in der XRechnung');
+  // Zahlungen
+  await klick(s, '#reZahlung', 'Zahlung buchen'); await schublade(s, { betrag: '100' }, '#speichern'); await meldungIst(s, /noch offen/, 'Teilzahlung gebucht');
+  await klick(s, '[data-zweg]', 'Zahlung zurücknehmen'); await meldungIst(s, /Zahlung zurückgenommen/, 'Zahlung zurückgenommen');
+  await klick(s, '#reMahnen', 'Mahnen (noch nicht fällig)'); await meldungIst(s, /Keine Mahnung fällig/, 'noch nicht fällig → keine Mahnung');
+  await klick(s, '#reSperre', 'Mahnsperre setzen'); await meldungIst(s, /Mahnsperre gesetzt/, 'Mahnsperre gesetzt'); await klick(s, '#reSperre', 'Mahnsperre aufheben'); await meldungIst(s, /aufgehoben/, 'Mahnsperre aufgehoben');
+  await klick(s, '#reKopie', 'Als Vorlage kopieren'); await meldungIst(s, /Kopie als Entwurf/, 'Kopie angelegt'); await s.waitForURL(u => !u.href.endsWith('/' + rid)); await klick(s, '#reLoeschen', 'Kopie verwerfen'); await meldungIst(s, /Entwurf gelöscht/, 'Kopie gelöscht');
+  // Mahnwesen: zwei Rechnungen überfällig machen (Fälligkeit zurückdatieren, wie nach 45 Tagen)
+  const d = datenbank(); d.prepare("UPDATE rechnung SET faellig = ? WHERE status = 'gestellt' AND storno_von IS NULL").run(plus(-45)); d.close(); ok('Fälligkeit zurückdatiert (45 Tage überfällig)');
+  await klick(s, '#zuMahnlauf', 'Mahnlauf öffnen'); const posten = await s.locator('[data-ml]').count(); if (posten < 2) throw new Error('nur ' + posten + ' mahnfällige Posten'); ok(posten + ' Posten zum Mahnen fällig');
+  await s.locator('[data-mahn]').first().click(); await textDa(s, '#schublade', /Mahnung(en)? erstellt/, 'Einzelmahnung ohne Ergebnis'); ok('einzelne Rechnung mahnen'); await s.click('#schublade #abbrechen');
+  await klick(s, '[data-sperre]', 'Mahnsperre in der OP-Liste'); await meldungIst(s, /Mahnsperre gesetzt/, 'Sperre aus der OP-Liste'); await s.locator('[data-sperre][data-an="0"]').first().click(); await ruhig(s); await meldungIst(s, /aufgehoben/, 'Sperre aufgehoben');
+  await klick(s, '#mlStart', 'Mahnlauf für Ausgewählte'); await textDa(s, '#schublade', /Mahnung(en)? erstellt/, 'Mahnlauf ohne Ergebnis'); ok('Mahnlauf erstellt die übrigen Mahnungen'); await bild(s, 'b28-mahnlauf'); await s.click('#schublade #abbrechen');
+  const pdf = await s.request.get(URL0 + (await s.locator('a[href^="/api/mahnung/pdf"]').first().getAttribute('href').catch(() => '/api/mahnungen'))); ok('Mahnungs-PDF erreichbar (' + pdf.status() + ')');
+  await klick(s, '[data-reiter=mahnungen]', 'Reiter Mahnungen'); const mp = await s.request.get(URL0 + await s.locator('a[href^="/api/mahnung/pdf"]').first().getAttribute('href'));
+  if (mp.headers()['content-type'] !== 'application/pdf') throw new Error('Mahnung kein PDF'); ok('Mahnung als PDF auf Briefpapier');
+  await klick(s, '[data-mzurueck]', 'letzte Mahnung zurücknehmen'); await meldungIst(s, /Mahnung zurückgenommen/, 'Mahnung zurückgenommen');
+  await klick(s, '[data-reiter=uebersicht]', 'Rechnungsübersicht'); await s.fill('#fSuche', nr); await ruhig(s); ok('Suche nach Rechnungsnummer'); await s.selectOption('#fStatus', 'ueberfaellig'); await ruhig(s); ok('Filter überfällig');
+  if (!(await s.locator('tr[data-re]').count())) throw new Error('überfällige Rechnung nicht in der Liste'); await s.selectOption('#fStatus', 'alle'); await s.fill('#fSuche', '');
+  const [csv] = await Promise.all([s.waitForEvent('download'), s.click('#reCsv')]); ok('Rechnungsliste als CSV: ' + csv.suggestedFilename());
+  await klick(s, '[data-reiter=einstellungen]', 'Reiter Einstellungen'); await s.fill('[name=mahn_gebuehr_2]', '7.50'); await klick(s, '#mahnSpeichern', 'Mahnwesen speichern'); await meldungIst(s, /Mahnwesen gespeichert/, 'Mahngebühren gespeichert');
+  await s.fill('[name=bz_ab]', '2027-01-01'); await s.fill('[name=bz_prozent]', '1.4'); await klick(s, '#bzNeu', 'Basiszins eintragen'); await meldungIst(s, /Basiszinssatz eingetragen/, 'Basiszins 2027 eingetragen');
+  await klick(s, '[data-bzweg="2027-01-01"]', 'Basiszins entfernen'); if (/01\.01\.2027/.test(await s.textContent('#abBereich'))) throw new Error('Basiszins nicht entfernt'); ok('Basiszins entfernt');
+  // Objektakte
+  await klick(s, '#nav a[data-v=objekte]', 'Objekte'); await s.locator('[data-objekt]', { hasText: 'Abnahme-Objekt Kiel' }).click(); await s.waitForURL(/#objekt\//); await ruhig(s);
+  await klick(s, '#akteBearbeiten', 'Objektakte bearbeiten'); await s.selectOption('#schublade [name=objektart]', 'buero'); await s.fill('#schublade [name=zeit_von]', '18:00'); await s.fill('#schublade [name=zeit_bis]', '21:00');
+  await schublade(s, { objektnummer: 'O-1001', ap_name: 'Herr Vorort', ap_telefon: '0431 000', schluessel: 'Transponder 12', besonderheiten: 'Serverraum nicht betreten' }); await meldungIst(s, /Objektakte gespeichert/, 'Objektakte gespeichert');
+  if (!/Reinigung 18:00–21:00 Uhr/.test(await s.textContent('#inhalt'))) throw new Error('Objektkopf ohne Reinigungszeit'); ok('Objektkopf zeigt Zeiten und Ansprechpartner'); await bild(s, 'b29-objektakte');
+  await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen am Objekt'); if (!(await s.locator('#oBereich tr').count())) throw new Error('keine Rechnungen am Objekt'); ok('Rechnungen des Objekts');
+  // Planner
+  await klick(s, '#nav a[data-v=planner]', 'Planner öffnen'); await klick(s, '[data-board]', 'Board öffnen'); await s.waitForURL(/#board\//); await klick(s, '#nav a[data-v=planner]', 'zurück zu den Boards');
+  await klick(s, '#neuBoard', '+ Board'); await schublade(s, { name: 'Abnahme-Board', beschreibung: 'Test' }); await meldungIst(s, /Gespeichert/, 'Board angelegt'); await s.waitForURL(/#board\/\d+/); await ruhig(s);
+  await klick(s, '#bNeu', '+ Aufgabe'); await wahlText(s, '#schublade [name=zustaendig]', 'Anna'); await schublade(s, { titel: 'Streugut bestellen', faellig: plus(3), prioritaet: 'hoch', labels: 'Winter' }); await meldungIst(s, /Gespeichert/, 'Aufgabe an Anna zugewiesen');
+  await klick(s, '[data-neuin]', '+ Aufgabe in Spalte'); await schublade(s, { titel: 'Wegwerf-Karte' }); await meldungIst(s, /Gespeichert/, 'zweite Aufgabe');
+  await s.locator('[data-karte]', { hasText: 'Streugut' }).dragTo(s.locator('[data-spalte]').nth(1)); await ruhig(s);
+  if (!(await s.locator('[data-spalte]').nth(1).locator('[data-karte]', { hasText: 'Streugut' }).count())) throw new Error('Karte nicht verschoben'); ok('Karte per Ziehen in „In Arbeit"');
+  await s.locator('[data-karte]', { hasText: 'Streugut' }).click(); await s.locator('#schublade').waitFor({ state: 'visible' });
+  await s.fill('#kPunkt', 'Angebot einholen'); await klick(s, '#kPunktNeu', 'Checklistenpunkt'); await s.fill('#kPunkt', 'Punkt zum Löschen'); await klick(s, '#kPunktNeu', 'zweiter Punkt');
+  await s.locator('[data-kp]').first().check(); await ruhig(s); ok('Punkt abgehakt'); await s.locator('[data-kpweg]').last().click(); await ruhig(s); ok('Punkt gelöscht');
+  await s.fill('#kKom', 'Lieferant angefragt'); await klick(s, '#kKomNeu', 'Kommentar'); if (!/Lieferant angefragt/.test(await s.textContent('#schublade'))) throw new Error('Kommentar fehlt'); ok('Kommentar an der Karte');
+  await klick(s, '#kBearb', 'Karte bearbeiten'); await schublade(s, { beschreibung: '2 t Splitt' }); await meldungIst(s, /Gespeichert/, 'Karte gespeichert');
+  await s.locator('[data-karte]', { hasText: 'Streugut' }).click(); await s.locator('#schublade').waitFor({ state: 'visible' }); await klick(s, '#kChat', 'Nachricht an die Zuständige'); await s.locator('#kommPanel').waitFor({ state: 'visible' }); ok('Chat mit der Zuständigen geöffnet'); await s.click('#kommZu');
+  await s.locator('[data-karte]', { hasText: 'Wegwerf' }).click(); await klick(s, '#kErl', 'Karte erledigt'); await s.click('#schublade #abbrechen'); await s.locator('[data-karte]', { hasText: 'Wegwerf' }).click(); await klick(s, '#kBearb', 'bearbeiten'); await klick(s, '#kLoeschen', 'Karte löschen'); await meldungIst(s, /Gelöscht/, 'Karte gelöscht');
+  await klick(s, '#bSpalte', '+ Spalte'); await s.locator('[data-spaltebearb]').last().click(); await s.locator('#schublade').waitFor({ state: 'visible' }); await klick(s, '#spLoeschen', 'Spalte löschen');
+  await s.locator('[data-spaltebearb]').first().click(); await schublade(s, { name: 'Offen' }); ok('Spalte umbenannt'); await bild(s, 'b30-planner');
+  await klick(s, '#nav a[data-v=planner]', 'Boards'); await klick(s, '#neuBoard', '+ Wegwerf-Board'); await schublade(s, { name: 'Wegwerf-Board' }); await s.waitForURL(/#board\/\d+/); await ruhig(s);
+  await klick(s, '#bBearb', 'Board bearbeiten'); await klick(s, '#boardArchiv', 'Board archivieren'); await s.waitForURL(/#planner$/); await ruhig(s);
+  if (/Wegwerf-Board/.test(await s.textContent('#inhalt'))) throw new Error('archiviertes Board noch sichtbar'); ok('Board archiviert, Abnahme-Board bleibt');
+  // Chat im Büro: Kanal, Nachricht, Aufgabe und Mangel aus der Nachricht, meine Aufgaben
+  await klick(s, '#kommKnopf', 'Chat öffnen'); if (await s.locator('#kommZurueck').isVisible()) await klick(s, '#kommZurueck', 'Chat öffnet im letzten Gespräch → zur Kanalliste');
+  await s.locator('[data-kanal="buchhaltung"]').click(); await ruhig(s);
+  await s.fill('#kommText', 'Bitte OP-Liste prüfen'); await klick(s, '#kommSenden', 'Nachricht in Buchhaltung');
+  await s.locator('#kommVerlauf [data-aufgabe]').last().click(); await s.locator('#schublade').waitFor({ state: 'visible' }); await wahlText(s, '#schublade [name=zustaendig]', 'ich selbst'); await s.click('#schublade #speichern'); await ruhig(s); await meldungIst(s, /Aufgabe angelegt/, 'Aufgabe aus Nachricht');
+  await s.locator('#kommVerlauf [data-mangel]').last().click(); await s.locator('#schublade').waitFor({ state: 'visible' }); await wahlText(s, '#schublade [name=objekt_id]', 'Abnahme-Objekt Kiel'); await s.click('#schublade #speichern'); await ruhig(s); await meldungIst(s, /Mangel erfasst/, 'Mangel aus Nachricht');
+  await klick(s, '#kommZurueck', 'zurück zur Kanalliste'); await klick(s, '[data-kansicht="aufgaben"]', 'Meine Aufgaben');
+  await s.locator('[data-auf]').first().click(); await ruhig(s); await s.fill('#kommKom', 'erledige ich'); await klick(s, '#kommKomSenden', 'Kommentar aus dem Chat'); await klick(s, '#kommAufErl', 'Aufgabe erledigt'); await meldungIst(s, /Erledigt/, 'Aufgabe im Chat erledigt');
+  await s.locator('[data-erl]').first().uncheck(); await ruhig(s); await meldungIst(s, /Wieder offen/, 'Aufgabe wieder offen');
+  await klick(s, '[data-kansicht="chats"]', 'Chats'); await klick(s, '#kommPlanner', 'Planner aus dem Chat'); await s.waitForURL(/#planner/); ok('Planner aus dem Chat erreicht');
+  await klick(s, '#abmelden', 'Abmelden'); await ctx.close();
+  // Mitarbeiter-App: Mängel-Chat mit Objekt → Mangel, zugewiesene Aufgabe abhaken
+  const actx = await b.newContext({ serviceWorkers: 'block', viewport: { width: 390, height: 844 }, hasTouch: true }); const a = await actx.newPage(); await beobachten(a, 'App-Chat');
+  await a.goto(URL0 + '/app'); await ruhig(a); await a.click('.kachel:has-text("Anna")'); for (const z of ['1', '1', '1', '1', '✓']) await a.click('[data-z="' + z + '"]'); await a.locator('.app-gruss').waitFor();
+  await a.locator('#kommKnopf').waitFor({ timeout: 15000 }); await klick(a, '#kommKnopf', 'App: Chat öffnen'); await a.locator('[data-kanal="maengel"]').click(); await ruhig(a);
+  await a.selectOption('#kommObjekt', { index: 1 }); await a.fill('#kommText', 'Papierhandtücher leer (Abnahme)'); await klick(a, '#kommSenden', 'App: Meldung senden'); await meldungIst(a, /Mangel ist am Objekt erfasst/, 'Meldung mit Objekt wird Mangel');
+  await klick(a, '#kommZurueck', 'App: zurück'); await klick(a, '[data-kansicht="aufgaben"]', 'App: meine Aufgaben');
+  if (!/Streugut bestellen/.test(await a.textContent('#kommInhalt'))) throw new Error('zugewiesene Aufgabe fehlt in der App'); ok('App zeigt die zugewiesene Aufgabe');
+  await a.locator('[data-auf]', { hasText: 'Streugut' }).click(); await ruhig(a); await a.locator('[data-punkt]').first().uncheck(); await ruhig(a); ok('App: Checklistenpunkt');
+  await klick(a, '#kommAufErl', 'App: Aufgabe erledigt'); await meldungIst(a, /Erledigt/, 'App: erledigt → Büro wird benachrichtigt'); await bild(a, 'a07-chat');
+  await actx.close();
+}
+
 (async function () {
   const mitWebkit = process.argv.includes('--webkit');
   // Attrappe der Adresssuche (Nominatim-Schnittstelle), damit die Abnahme ohne Internet und ohne fremden Dienst läuft
@@ -396,7 +531,7 @@ async function buero2(b) {
   try {
     b = await chromium.launch();
     if (process.env.NUR_APP) { await app(b, true); throw new Error('NUR_APP fertig'); }
-    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b);
+    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b); await erweiterung(b);
     await b.close(); b = null;
     if (mitWebkit) {
       const w = await webkit.launch(); const ctx = await w.newContext({ viewport: { width: 390, height: 844 } }); const s = await ctx.newPage(); await beobachten(s, 'WebKit');
