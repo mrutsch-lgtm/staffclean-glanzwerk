@@ -12,4 +12,4 @@ quellen.forEach(function (q) {
   ids.forEach(function (k) { gesamt.add(q + ' ' + k); const roh = k.replace(/^#/, '').replace(/^\[data-|\]$/g, ''); if (!test.includes(k.replace(/\]$/, '')) && !test.includes("'" + k) && !test.includes(roh)) fehlend.push(q + '  ' + k); });
 });
 console.log(gesamt.size + ' Knöpfe/Handler gefunden, ' + (gesamt.size - fehlend.length) + ' in der Abnahme angeklickt');
-console.log('NICHT in der Abnahme:\n' + fehlend.join('\n'));
+if (fehlend.length) { console.log('NICHT in der Abnahme:\n' + fehlend.join('\n')); process.exit(1); }
