@@ -9,16 +9,16 @@ Konzept und Marktrecherche: `E:\StaffClean-Gehirn\_wissen\konzept_software.md`.
 ```
 npm install
 npm start          # http://127.0.0.1:8790  (erstes Büro-Konto über /einrichten, nur am Rechner selbst)
-npm test           # Turnus, Feiertage, LV-Import, Schnittstelle (18 Tests)
+npm test           # Turnus, Feiertage, LV-Import, Kalkulation, Schnittstelle (26 Tests)
 npm run abnahme    # Browser-Abnahme: klickt jeden Knopf in Büro, App, Kundenportal (+ WebKit)
 ```
 
 | Adresse | Wer | Was |
 |---|---|---|
-| `/` | Büro | Übersicht mit Alarmen, Dienstplan, Objekte (LV-Raster, Woche, Kalkulation & Angebot, Standort & QR, Team/Mängel/Prüfungen), Tagesplan, LV-Import, Einsatz (Abwesenheit, Vertretung, Minijob-Auslastung), Qualität, Zeiten & Lohn (Soll/Ist, Zuschläge, DATEV), Mitarbeiter, Kunden & Portal-Zugänge, Mängel, Stammdaten |
+| `/` | Büro | Übersicht mit Alarmen, Dienstplan, Objekte (LV-Raster, Woche, Kalkulation & Angebot, Standort & QR, Team/Mängel/Prüfungen), Tagesplan, LV-Import, Einsatz (Abwesenheit, Vertretung, Minijob-Auslastung), Qualität, Zeiten & Lohn (Soll/Ist, Zuschläge, DATEV), Abrechnung (Rechnungen, Sonderleistungen), Mitarbeiter, Kunden & Portal-Zugänge, Mängel, Stammdaten (inkl. Standard-Leistungskatalog) |
 | `/app` | Mitarbeiter (PIN) | Heute → Objekt → Kommen/Gehen stempeln am Standort → Raum per QR-Code oder Liste → abhaken, Foto, Mangel melden; Schichten bestätigen, Vertretung zu-/absagen; ohne Netz wird nachgereicht; DE/PL/RO/EN |
-| `/kunde` | Kunde (Passwort) | eigene Objekte, Leistungsnachweis 14 Tage mit Fotos, Prüfberichte abzeichnen, Reklamation mit Foto |
-| `/drucken/qr`, `/drucken/angebot`, `/drucken/pruefung` | Büro (Bericht auch Kunde) | QR-Aufkleber je Raum, Angebot ohne interne Kalkulation, Prüfbericht |
+| `/kunde` | Kunde (Passwort) | eigene Objekte, Leistungsnachweis 14 Tage mit Fotos, Prüfberichte abzeichnen, Reklamation mit Foto, Sonderleistung anfragen, Rechnungen + XRechnung |
+| `/drucken/qr`, `/drucken/angebot`, `/drucken/pruefung`, `/drucken/rechnung` | Büro (Bericht und Rechnung auch Kunde) | QR-Aufkleber je Raum, Angebot ohne interne Kalkulation (mit Preisbausteinen), Prüfbericht, Rechnung mit Pflichtangaben |
 | `/gestaltung` | – | Design-System (abgeleitet von staffclean.de) |
 
 Beim ersten Start werden **erfundene Beispieldaten** angelegt (`STAFFCLEAN_DEMO=0` schaltet das ab; die Demo-PINs 1111/2222 gibt es dann nicht).
@@ -39,3 +39,6 @@ Daten liegen in `daten\` (SQLite + Fotos, nicht im Git), anderer Ort über `STAF
 - **Dienstplan** (`lib/dienstplan.js`): Konflikte nach ArbZG (Überschneidung, unter 11 Std. Ruhezeit, über 10 Std. am Tag, Pausen), Abwesenheit, Minijob-Grenze; Serien, Vorwoche übernehmen.
 - **Stunden & DATEV**: Ist aus Stempelzeiten mit Nacht-, Sonntags- und Feiertagsanteil; Export als Bewegungsdaten (Personalnummer, Lohnart, Stunden). ⚠ Die Lohnart-Nummern sind Platzhalter — mit dem Lohnbüro abstimmen.
 - **Stempeln mit Standort**: nur im Umkreis des Objekts (Standard 150 m); der Standort wird bei jedem Stempeln frisch ermittelt.
+- **Abrechnung** (`lib/abrechnung.js`): Rechnung je Objekt und Monat aus Monatspauschale, Preisbausteinen (Glas je Durchgang nach Turnus, Winterdienst in der Saison, Stundensatz) und erledigten Sonderleistungen. Stellen nur mit Pflichtangaben (§ 14 UStG), fortlaufende Nummer je Jahr, danach unveränderlich; Korrektur per Storno. XRechnung 3.0 (UBL) — nicht amtlich validiert, vor dem ersten Behördenversand durch den KoSIT-Validator schicken.
+- **Echte LVs:** Import versteht Legenden mit eigenen Kürzeln (m2 = 14-täglich …), `jN`, „1. Mi", feste Monate `2 J (4,10)`, Sichtreinigung `S1–S4`, Spalten m²/Etage, Zwischen- und Summenzeilen, Anschriften ohne Komma; Schreibvarianten derselben Tätigkeit werden zusammengeführt. Je Raum eine **Anzahl** (Etagen, Treppenläufe).
+- **Einpreisen:** Standard-Leistungskatalog (`lib/katalog.js`, Beschreibungen ohne Minuten) und „Richtzeiten an Zielpreis ausrichten" (Kalkulation) — Vorgehen: `E:StaffClean-Gehirn_wisseneferenz_einpreisung_unterhaltsreinigung.md`.
