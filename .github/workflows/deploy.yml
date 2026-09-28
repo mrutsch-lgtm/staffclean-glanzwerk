@@ -6,7 +6,7 @@ name: Glanzwerk auf den Server bringen
 # Caddyfile des Sales-Hub-Repos, weil Caddy dort für alle Domains des Servers verwaltet wird).
 #
 # ⭐ Erst wenn alle Prüfungen grün sind, geht etwas live: Unit- und Schnittstellentests.
-# 🔴 Keine Zugangsdaten im Code: SERVER_HOST, SERVER_USER und SSH_KEY sind GitHub-Secrets. SSH_KEY ist ein eigener
+# 🔴 Keine Zugangsdaten im Code: SERVER_HOST und SSH_KEY sind GitHub-Secrets (Anmeldung als root wie bei allen Diensten des Servers). SSH_KEY ist ein eigener
 #    Schlüssel nur für Glanzwerk (öffentlicher Teil über glanzwerk-zugang.yml im Sales-Hub-Repo eingetragen) —
 #    das Server-Passwort kennt dieses Repository nicht.
 
@@ -37,20 +37,18 @@ jobs:
         env:
           HOST: ${{ secrets.SERVER_HOST }}
           KEY: ${{ secrets.SSH_KEY }}
-          USERNAME: ${{ secrets.SERVER_USER }}
         run: |
-          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_KEY fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "::warning::Secrets SERVER_HOST, SSH_KEY fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "bereit=ja" >> "$GITHUB_OUTPUT"
           # Fingerabdruck ist öffentlich (kein Geheimnis) — zum Abgleich mit dem eingetragenen Schlüssel
           umask 077; printf '%s\n' "$KEY" > /tmp/k; echo "Schlüssel: $(ssh-keygen -lf /tmp/k 2>&1 | cut -d' ' -f2)"; rm -f /tmp/k
-          echo "Benutzer: $USERNAME" | sed 's/./& /g'
 
       - name: Dateien hochladen
         if: steps.zugang.outputs.bereit == 'ja'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
+          username: root
           key: ${{ secrets.SSH_KEY }}
           port: 22
           source: "server.js,package.json,package-lock.json,lib/,web/"
@@ -62,7 +60,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
+          username: root
           key: ${{ secrets.SSH_KEY }}
           port: 22
           script: |
