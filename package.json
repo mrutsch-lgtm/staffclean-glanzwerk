@@ -1,0 +1,15 @@
+{
+  "name": "staffclean-software",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StaffClean — Planung, Mitarbeiter-App und Nachweise für die Gebäudereinigung",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/turnus.test.js test/lv-import.test.js"
+  },
+  "engines": { "node": ">=22.5" },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

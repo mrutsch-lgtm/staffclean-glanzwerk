@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StaffClean · Gestaltung</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>
+  .farbe { border-radius: 14px; overflow: hidden; border: 1px solid var(--linie); background: var(--flaeche); }
+  .farbe i { display: block; height: 72px; }
+  .farbe div { padding: .6rem .8rem; font-size: .8rem; }
+  .farbe b { display: block; font-size: .85rem; }
+  .muster { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+</style>
+</head>
+<body>
+<header class="kopf"><div class="innen"><img class="logo" src="/bilder/logo-hell.webp" alt="StaffClean"><nav class="nav"><a class="aktiv" href="/gestaltung">Gestaltung</a><a href="/">Büro</a><a href="/app">App</a></nav></div></header>
+<section class="titelband"><div class="innen">
+  <div class="glas">Design-System · abgeleitet von staffclean.de</div>
+  <h1 style="margin-top:1rem"><span class="umriss">Ein</span> Auftritt, <span class="akzent">ein Guss</span></h1>
+  <p>Farben, Schrift und Bausteine der Website — für Büro-Software, Mitarbeiter-App und Kundenportal. Wer etwas Neues baut, nimmt es von hier.</p>
+</div></section>
+<main class="seite">
+  <div class="abschnitt"><div class="ueberzeile">Farben</div><h2>Smaragd, Tannengrün, Logo-Gold</h2>
+    <div class="raster k4" style="margin-top:1rem">
+      <div class="farbe"><i style="background:#065f46"></i><div><b>Smaragd 800</b>#065f46 · Hauptknöpfe</div></div>
+      <div class="farbe"><i style="background:#10b981"></i><div><b>Smaragd 500</b>#10b981 · Erledigt, Fortschritt</div></div>
+      <div class="farbe"><i style="background:#022c22"></i><div><b>Tannengrün</b>#022c22 · Kopf, Bänder</div></div>
+      <div class="farbe"><i style="background:#cdbd93"></i><div><b>Logo-Gold</b>#cdbd93 · Akzentlinie, Qualität</div></div>
+    </div>
+  </div>
+  <div class="abschnitt raster k2">
+    <div class="karte"><div class="ueberzeile">Schrift</div><h1 style="font-size:2rem">Inter, fett und klar</h1><h2>Überschrift zwei</h2><h3>Überschrift drei</h3><p class="leise">Fließtext in Inter, gut lesbar am Handy und auf dem Bildschirm im Büro. Echte Umlaute: Gebäude, Türgriffe, Fußleisten.</p></div>
+    <div class="karte"><div class="ueberzeile">Knöpfe &amp; Marken</div>
+      <div class="muster"><button class="knopf">Hauptaktion</button><button class="knopf zweit">Zweitaktion</button><button class="knopf gold">Hervorhebung</button><button class="knopf klein">Klein</button></div>
+      <div class="muster" style="margin-top:1rem"><span class="marke">erledigt</span><span class="marke gold">Qualität 94 %</span><span class="marke orange">unbestätigt</span><span class="marke rot">Mangel</span><span class="marke grau">offen</span></div>
+      <div style="margin-top:1rem;background:var(--gruen-900);padding:1rem;border-radius:14px" class="muster"><span class="glas">Glas-Plakette</span><button class="knopf hell">Auf dunklem Grund</button><span class="pille gruen"><span class="punkt"></span> 24/7</span></div>
+    </div>
+  </div>
+  <div class="abschnitt raster k4">
+    <div class="karte kennzahl"><div class="symbolkasten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><div class="zahl">86 %</div><div class="etikett">Kennzahl-Karte</div></div>
+    <div class="karte akzentlinie"><h3>Karte mit Akzentlinie</h3><p class="leise klein">Grün→Gold oben, wie auf der Website.</p><div class="fortschritt"><i style="width:62%"></i></div></div>
+    <div class="karte"><h3>Hinweise</h3><div class="hinweis">Achtung: Turnus unklar</div><div class="hinweis gruen" style="margin-top:.5rem">Alles erledigt</div></div>
+    <div class="karte"><h3>Formular</h3><label class="feld">Raum<input value="Teeküche"></label></div>
+  </div>
+  <div class="abschnitt"><div class="ueberzeile">Mitarbeiter-App</div><h2>Große Tippflächen, ein Schritt je Bildschirm</h2>
+    <div class="raster k3" style="margin-top:1rem">
+      <button class="kachel"><span class="rund" style="--p:60"><span>60%</span></span><span><b>Bürohaus Musterweg 1</b><br><span class="leise klein">7 Räume · 9/15</span></span></button>
+      <div class="aufgabe fertig"><button class="haken"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button><div><div class="was">Sanitär reinigen und desinfizieren</div><div class="leise klein">Mo, Di, Mi, Do, Fr · ✓ 07:42</div></div></div>
+      <div class="aufgabe"><button class="haken"></button><div><div class="was">Boden saugen und feucht wischen</div><div class="leise klein">Mo, Mi, Fr · ca. 6 Min.</div></div></div>
+    </div>
+  </div>
+</main>
+</body>
+</html>
