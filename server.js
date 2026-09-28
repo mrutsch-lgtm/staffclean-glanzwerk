@@ -18,6 +18,7 @@ const EINS = require('./lib/einsatz');
 const GEO = require('./lib/geo');
 const DP = require('./lib/dienstplan');
 const AB = require('./lib/abrechnung');
+const KAT = require('./lib/katalog');
 
 const PORT = Number(process.env.STAFFCLEAN_PORT || 8790);
 const HOST = process.env.STAFFCLEAN_HOST || '127.0.0.1';
@@ -404,6 +405,12 @@ async function bueroApi(req, res, p, q, ich) {
     if (!k) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, k);
   }
   if (p === '/api/objekt/preis' && req.method === 'POST') { const b = await leib(req); db.prepare('UPDATE objekt SET monatspreis = ? WHERE id = ?').run(zahl(b.monatspreis), Number(b.id)); return json(res, 200, { ok: true }); }
+  if (p === '/api/kalkulation/kalibrieren') {
+    const b = req.method === 'POST' ? await leib(req) : { objekt: q.get('objekt'), ziel: q.get('ziel') };
+    try { const v = req.method === 'POST' ? KALK.kalibrierungUebernehmen(db, b.objekt, b.ziel) : KALK.kalibrieren(db, b.objekt, b.ziel); if (!v) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, v); }
+    catch (e) { if (e instanceof Fehler) throw e; throw new Fehler(400, e.message); }
+  }
+  if (p === '/api/katalog' && req.method === 'POST') return json(res, 200, Object.assign({ ok: true }, KAT.laden(db, LV.vergleich)));
   // --- Einsatzplan
   if (p === '/api/einsatzplan') { const d = q.get('datum') || heute(); const n = new Date(); return json(res, 200, { datum: d, auslastung: EINS.auslastung(db), lage: EINS.lage(db, d, d === heute() ? n.getHours() * 60 + n.getMinutes() : null), abwesenheiten: db.prepare('SELECT a.*, m.name FROM abwesenheit a JOIN mitarbeiter m ON m.id = a.mitarbeiter_id WHERE a.bis >= ? ORDER BY a.von').all(heute()) }); }
   if (p === '/api/abwesenheit' && req.method === 'POST') {

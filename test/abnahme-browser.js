@@ -113,6 +113,10 @@ async function buero1(b) {
   erwartet(); await klick(s, '#neuBaustein', '+ Baustein ohne Turnus'); await schublade(s, { bezeichnung: 'Glas ohne Turnus', art: 'je_ausfuehrung', turnus: '', preis: '10' }); await meldungIst(s, /Turnus/, 'Baustein „je Durchgang" ohne Turnus abgelehnt'); await s.click('#schublade #abbrechen');
   await klick(s, '#neuBaustein', '+ Winterdienst'); await schublade(s, { bezeichnung: 'Winterdienst Zuwegung', art: 'monatlich', monate: '11,12,1,2,3', preis: '90', einheit: 'Monat' }); await meldungIst(s, /Baustein gespeichert/, 'Winterdienst nur Nov–März');
   await s.locator('[data-bs]').first().click(); await schublade(s, { preis: '53.50' }); await meldungIst(s, /Baustein gespeichert/, 'Baustein ändern');
+  erwartet(); await s.fill('[name=zielpreis]', '1'); await klick(s, '#kalibrieren', 'Zielpreis 1 € (zu niedrig)'); await meldungIst(s, /Wegezeit/, 'Zielpreis unter Wegezeit abgelehnt');
+  await s.fill('[name=zielpreis]', '236.25'); await klick(s, '#kalibrieren', 'Richtzeiten-Vorschau für 236,25 €');
+  if (!/Faktor/.test(await s.textContent('#kalibVorschau'))) throw new Error('Kalibrier-Vorschau fehlt'); ok('Vorschau: Faktor und neue Minuten je Position');
+  await klick(s, '#kalibUebernehmen', 'Richtzeiten übernehmen'); await meldungIst(s, /neuer Monatspreis 23[5-7],\d\d/, 'Kalkulation trifft den Zielpreis');
   await bild(s, 'b05-objekt-kalkulation');
   const [angebot] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/angebot"]')]); await beobachten(angebot, 'Angebot'); await ruhig(angebot);
   await angebot.locator('#weitere h3').waitFor();
@@ -180,7 +184,10 @@ async function buero1(b) {
   erwartet(); await klick(s, '[data-ma]', 'Mitarbeiter bearbeiten'); await schublade(s, { pin: '12' }, '#speichern'); await meldungIst(s, /4 bis 8/, 'zu kurze PIN wird abgelehnt'); await s.click('#schublade #abbrechen');
   await bild(s, 'b15-mitarbeiter');
   // Stammdaten
-  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten öffnen'); await klick(s, '[data-t]', 'Tätigkeit bearbeiten');
+  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten öffnen');
+  await klick(s, '#katalog', 'Standardkatalog übernehmen'); await meldungIst(s, /Katalog: \d+ neu/, 'Standardkatalog geladen');
+  if (!/Glasreinigung inkl\. Rahmen/.test(await s.textContent('#sBereich'))) throw new Error('Katalog nicht in der Liste'); ok('Katalog-Tätigkeiten mit Beschreibung sichtbar');
+  await klick(s, '[data-t]', 'Tätigkeit bearbeiten');
   await s.locator('#schublade').waitFor({ state: 'visible' }); await s.fill('#schublade [data-u=ro][data-f=name]', 'Aspirare și spălare'); await schublade(s, { minuten: '7' }, '#speichern'); await meldungIst(s, /Gespeichert/, 'Tätigkeit + Übersetzung speichern');
   await klick(s, '#neuT', '+ Tätigkeit'); await schublade(s, { name: 'Fenster innen reinigen', kategorie: 'Glas', minuten: '10' }, '#speichern'); await meldungIst(s, /Gespeichert/, 'neue Tätigkeit');
   await klick(s, '[data-reiter=tarife]', 'Reiter Tarife'); await klick(s, '#neuTarif', '+ Tarif'); await schublade(s, { lohngruppe: 'LG 1', stundenlohn: '15.50', gueltig_ab: '2027-01-01' }, '#speichern'); await meldungIst(s, /Tarif eingetragen/, 'Tarif eintragen');
