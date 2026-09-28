@@ -524,7 +524,9 @@
     const formular = k => schublade('<h2>' + (k.id ? 'Kunde bearbeiten' : 'Neuer Kunde') + '</h2><div class="formular" style="margin-top:1rem">' + feld('name', 'Firma', k.name) + feld('ansprechpartner', 'Ansprechpartner', k.ansprechpartner) + feld('email', 'E-Mail', k.email, 'email') + feld('telefon', 'Telefon', k.telefon) + feld('anschrift', 'Straße', k.anschrift) + feld('plz', 'PLZ', k.plz) + feld('ort', 'Ort', k.ort) + feld('kundennummer', 'Kundennummer', k.kundennummer) + feld('ust_id', 'USt-IdNr. des Kunden', k.ust_id) + feld('leitweg_id', 'Leitweg-ID (nur öffentliche Auftraggeber)', k.leitweg_id) +
       auswahl('sammelrechnung', 'Abrechnung', [['0', 'je Objekt eine Rechnung'], ['1', 'Sammelrechnung über alle Objekte']], k.sammelrechnung ? '1' : '0') +
       auswahl('rechnungsformat', 'Rechnungsformat', [['zugferd', 'ZUGFeRD (PDF mit eingebetteter XML)'], ['xrechnung', 'XRechnung (öffentliche Auftraggeber)'], ['pdf', 'nur PDF']], k.rechnungsformat || 'zugferd') +
-      feld('zahlungsziel_tage', 'Zahlungsziel in Tagen (leer = Standard)', k.zahlungsziel_tage, 'number') + feld('rechnung_email', 'E-Mail für Rechnungen', k.rechnung_email, 'email') + '</div>' + knoepfe(), function (w) {
+      feld('zahlungsziel_tage', 'Zahlungsziel in Tagen (leer = Standard)', k.zahlungsziel_tage, 'number') +
+      auswahl('steuerfall', 'Umsatzsteuer', [['normal', 'regulär (19 %)'], ['reverse_charge', '§ 13b UStG: Kunde ist selbst Gebäudereiniger']], k.steuerfall || 'normal') +
+      auswahl('privat', 'Kundenart', [['0', 'Unternehmen / Behörde'], ['1', 'Privatperson (Hinweis Aufbewahrungspflicht)']], k.privat ? '1' : '0') + feld('rechnung_email', 'E-Mail für Rechnungen', k.rechnung_email, 'email') + '</div>' + knoepfe(), function (w) {
       $('#speichern', w).onclick = async function () { const d = formDaten(w); d.id = k.id; try { await holen('/api/kunde', d); schubladeZu(); meldung('Gespeichert'); kunden(); } catch (e) { meldung(e.message); } };
     });
     $('#neuKunde').onclick = function () { formular({}); };

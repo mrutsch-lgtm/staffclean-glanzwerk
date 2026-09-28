@@ -6,8 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test --test-concurrency=1 test/turnus.test.js test/lv-import.test.js test/kalkulation.test.js test/api.test.js",
-    "abnahme": "node test/knopf-inventur.js && node test/abnahme-browser.js --webkit"
+    "test": "node --test --test-concurrency=1 test/turnus.test.js test/lv-import.test.js test/kalkulation.test.js test/steuer.test.js test/api.test.js",
+    "abnahme": "node test/knopf-inventur.js && node test/abnahme-browser.js --webkit",
+    "pruefen-erechnung": "node werkzeuge/pruefen-erechnung.js"
   },
   "engines": {
     "node": ">=22.5"

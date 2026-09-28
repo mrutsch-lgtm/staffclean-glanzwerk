@@ -528,9 +528,11 @@ async function bueroApi(req, res, p, q, ich) {
     const format = ['zugferd', 'xrechnung', 'pdf'].indexOf(b.rechnungsformat) >= 0 ? b.rechnungsformat : 'zugferd';
     if (format === 'xrechnung' && !b.leitweg_id) throw new Fehler(400, 'Für XRechnung (öffentliche Auftraggeber) bitte die Leitweg-ID eintragen.');
     const f = [b.name, b.ansprechpartner || null, b.email || null, b.telefon || null, b.anschrift || null, b.plz || null, b.ort || null, b.kundennummer || null, b.leitweg_id || null, b.ust_id || null,
-      b.sammelrechnung === true || b.sammelrechnung === '1' ? 1 : 0, format, zahl(b.zahlungsziel_tage), b.rechnung_email || null];
-    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=?, sammelrechnung=?, rechnungsformat=?, zahlungsziel_tage=?, rechnung_email=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id, sammelrechnung, rechnungsformat, zahlungsziel_tage, rechnung_email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+      b.sammelrechnung === true || b.sammelrechnung === '1' ? 1 : 0, format, zahl(b.zahlungsziel_tage), b.rechnung_email || null,
+      b.steuerfall === 'reverse_charge' ? 'reverse_charge' : 'normal', b.privat === true || b.privat === '1' ? 1 : 0];
+    if (f[14] === 'reverse_charge' && f[15]) throw new Fehler(400, '§ 13b gilt nur zwischen Unternehmen — ein Privatkunde kann nicht Steuerschuldner sein.');
+    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=?, sammelrechnung=?, rechnungsformat=?, zahlungsziel_tage=?, rechnung_email=?, steuerfall=?, privat=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id, sammelrechnung, rechnungsformat, zahlungsziel_tage, rechnung_email, steuerfall, privat) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
   }
   if (p === '/api/konten' && req.method === 'GET') return json(res, 200, db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id ORDER BY b.rolle, b.name').all());
   if (p === '/api/konto' && req.method === 'POST') {

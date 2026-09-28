@@ -376,7 +376,9 @@ async function buero2(b) {
   const txt = await s.textContent('#inhalt'); if (!/Reklamation/.test(txt) || !/Seifenspender/.test(txt) || !/Prüfung/.test(txt)) throw new Error('Mängel aus App/Kunde/Prüfung fehlen'); ok(vorher + ' Mängel: aus App, Kundenportal und Prüfung'); await bild(s, 'b20-maengel');
   await klick(s, '[data-erledigt]', 'Mangel erledigen'); if (await s.locator('[data-erledigt]').count() !== vorher - 1) throw new Error('Mangel nicht erledigt'); ok('Mangel erledigt');
   await klick(s, '#nav a[data-v=uebersicht]', 'Übersicht'); await klick(s, '#nav a[data-v=einsatz]', 'Einsatz (nach Zusage)');
-  if (!/zugesagt/.test(await s.textContent('#inhalt'))) throw new Error('Zusage aus der App nicht im Einsatzplan'); ok('Zusage der Vertretung im Einsatzplan sichtbar');
+  // Einsatzplan rechnet die Auslastung aller Objekte — auf den fertigen Inhalt warten statt einmal zu lesen
+  try { await s.locator('#inhalt', { hasText: 'zugesagt' }).waitFor({ timeout: 8000 }); } catch (e) { throw new Error('Zusage aus der App nicht im Einsatzplan'); }
+  ok('Zusage der Vertretung im Einsatzplan sichtbar');
   await klick(s, '#nav a[data-v=objekte]', 'Objekte'); await bild(s, 'b21-objekte');
   await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/); ok('Büro abgemeldet');
   await ctx.close();
