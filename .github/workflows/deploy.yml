@@ -37,8 +37,13 @@ jobs:
         env:
           HOST: ${{ secrets.SERVER_HOST }}
           KEY: ${{ secrets.SSH_KEY }}
+          USERNAME: ${{ secrets.SERVER_USER }}
         run: |
-          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_KEY fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; else echo "bereit=ja" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_KEY fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "bereit=ja" >> "$GITHUB_OUTPUT"
+          # Fingerabdruck ist öffentlich (kein Geheimnis) — zum Abgleich mit dem eingetragenen Schlüssel
+          umask 077; printf '%s\n' "$KEY" > /tmp/k; echo "Schlüssel: $(ssh-keygen -lf /tmp/k 2>&1 | cut -d' ' -f2)"; rm -f /tmp/k
+          echo "Benutzer: $USERNAME" | sed 's/./& /g'
 
       - name: Dateien hochladen
         if: steps.zugang.outputs.bereit == 'ja'
