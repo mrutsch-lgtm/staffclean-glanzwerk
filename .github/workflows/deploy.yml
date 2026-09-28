@@ -6,7 +6,9 @@ name: Glanzwerk auf den Server bringen
 # Caddyfile des Sales-Hub-Repos, weil Caddy dort für alle Domains des Servers verwaltet wird).
 #
 # ⭐ Erst wenn alle Prüfungen grün sind, geht etwas live: Unit- und Schnittstellentests.
-# 🔴 Keine Zugangsdaten im Code: SERVER_HOST, SERVER_USER, SSH_PASSWORD sind GitHub-Secrets (legt Manuel an).
+# 🔴 Keine Zugangsdaten im Code: SERVER_HOST, SERVER_USER und SSH_KEY sind GitHub-Secrets. SSH_KEY ist ein eigener
+#    Schlüssel nur für Glanzwerk (öffentlicher Teil über glanzwerk-zugang.yml im Sales-Hub-Repo eingetragen) —
+#    das Server-Passwort kennt dieses Repository nicht.
 
 on:
   workflow_dispatch:
@@ -34,8 +36,9 @@ jobs:
         id: zugang
         env:
           HOST: ${{ secrets.SERVER_HOST }}
+          KEY: ${{ secrets.SSH_KEY }}
         run: |
-          if [ -z "$HOST" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_PASSWORD fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; else echo "bereit=ja" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_KEY fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; else echo "bereit=ja" >> "$GITHUB_OUTPUT"; fi
 
       - name: Dateien hochladen
         if: steps.zugang.outputs.bereit == 'ja'
@@ -43,7 +46,7 @@ jobs:
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_KEY }}
           port: 22
           source: "server.js,package.json,package-lock.json,lib/,web/"
           target: "/home/staffsec/glanzwerk"
@@ -55,7 +58,7 @@ jobs:
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_KEY }}
           port: 22
           script: |
             set -e
