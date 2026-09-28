@@ -1,0 +1,82 @@
+name: Glanzwerk auf den Server bringen
+
+# Glanzwerk läuft wie Sales Hub, SU-Portal und Tracking-Leitstelle auf dem Hetzner-Server (Manuel 28.09.2026:
+# „wie haben wir das denn bei den anderen Seiten gemacht?"). Eigener Ordner, eigene Datenbank, eigener Dienst,
+# Port 3300; Caddy nimmt glanzwerk.staffclean.de an und holt das HTTPS-Zertifikat selbst (Eintrag im
+# Caddyfile des Sales-Hub-Repos, weil Caddy dort für alle Domains des Servers verwaltet wird).
+#
+# ⭐ Erst wenn alle Prüfungen grün sind, geht etwas live: Unit- und Schnittstellentests.
+# 🔴 Keine Zugangsdaten im Code: SERVER_HOST, SERVER_USER, SSH_PASSWORD sind GitHub-Secrets (legt Manuel an).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Prüfungen (müssen grün sein, sonst geht nichts live)
+        run: |
+          npm ci
+          npm test
+
+      - name: Dateien hochladen
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          source: "server.js,package.json,package-lock.json,lib/,web/"
+          target: "/home/staffsec/glanzwerk"
+          overwrite: true
+
+      - name: Node 24, Abhängigkeiten, Dienst starten
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          script: |
+            set -e
+            cd /home/staffsec/glanzwerk
+            # Glanzwerk braucht Node ≥ 22.13 (eingebaute SQLite). Eigene Node-Fassung im Benutzerordner, damit die
+            # anderen Dienste des Servers davon unberührt bleiben.
+            NODE_DIR=/home/staffsec/glanzwerk-node
+            if [ ! -x "$NODE_DIR/bin/node" ]; then
+              echo "=== Node 24 einrichten (nur für Glanzwerk) ==="
+              V=$(curl -s https://nodejs.org/dist/index.json | grep -o '"version":"v24[^"]*"' | head -1 | cut -d'"' -f4)
+              curl -fsSL "https://nodejs.org/dist/$V/node-$V-linux-x64.tar.xz" -o /tmp/node24.tar.xz
+              mkdir -p "$NODE_DIR" && tar -xJf /tmp/node24.tar.xz -C "$NODE_DIR" --strip-components=1
+            fi
+            export PATH="$NODE_DIR/bin:$PATH"
+            echo "Node: $(node -v)"
+            printf '%s\n%s\n%s\n' "${{ github.sha }}" "${{ github.run_number }}" "$(TZ=Europe/Berlin date '+%Y-%m-%d %H:%M:%S')" > fassung.txt
+            npm install --omit=dev --no-audit --no-fund 2>&1 | tail -3
+            mkdir -p /home/staffsec/glanzwerk-daten
+            # Echtbetrieb: keine Beispieldaten, hinter Caddy (HTTPS, Einrichtungscode statt „am Rechner"), Daten außerhalb des App-Ordners
+            export STAFFCLEAN_PORT=3300 STAFFCLEAN_HOST=127.0.0.1 STAFFCLEAN_HTTPS=1 STAFFCLEAN_PROXY=1 STAFFCLEAN_DEMO=0 STAFFCLEAN_DATEN=/home/staffsec/glanzwerk-daten TZ=Europe/Berlin
+            if pm2 describe glanzwerk > /dev/null 2>&1; then
+              pm2 restart glanzwerk --update-env
+            else
+              pm2 start server.js --name glanzwerk --interpreter "$NODE_DIR/bin/node" --update-env
+              pm2 save
+            fi
+            sleep 4
+            pm2 describe glanzwerk | grep -E "status|uptime|interpreter" || true
+            echo "=== Antwortet Glanzwerk? ==="
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3300/anmelden || echo 000)
+            echo "HTTP $CODE"; [ "$CODE" = "200" ] || { pm2 logs glanzwerk --lines 30 --nostream; exit 1; }
+            echo "=== Einrichtung ==="
+            # Solange es kein Büro-Konto gibt, steht hier der Einrichtungscode für https://glanzwerk.staffclean.de/einrichten
+            pm2 logs glanzwerk --lines 200 --nostream 2>/dev/null | grep -o "EINRICHTUNGSCODE.*" | tail -1 || echo "kein Code nötig — Büro-Konto besteht"

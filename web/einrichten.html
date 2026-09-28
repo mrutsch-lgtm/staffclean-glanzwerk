@@ -19,6 +19,7 @@
   <h2 style="text-align:center">Glanzwerk einrichten</h2>
   <p class="leise" style="text-align:center">Einmalig: das erste Büro-Konto anlegen. Das Passwort wählst du selbst, es wird nirgends gespeichert außer als Prüfwert.</p>
   <form id="form">
+    <label class="feld" id="codeFeld" hidden>Einrichtungscode<input name="code" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX"></label>
     <label class="feld">Name<input name="name" required></label>
     <label class="feld">E-Mail<input type="email" name="email" autocomplete="username" required></label>
     <label class="feld">Passwort (mind. 10 Zeichen)<input type="password" name="passwort" autocomplete="new-password" minlength="10" required></label>
@@ -32,11 +33,12 @@
   const f = document.getElementById('form'), fe = document.getElementById('fehler');
   const e = await (await fetch('/api/einrichten')).json();
   if (!e.noetig) { location.href = '/anmelden'; return; }
-  if (!e.lokal) fe.textContent = 'Das erste Konto lässt sich nur direkt am Rechner anlegen.';
+  if (e.mitCode) { document.getElementById('codeFeld').hidden = false; f.code.required = true; }
+  else if (!e.lokal) fe.textContent = 'Das erste Konto lässt sich nur direkt am Rechner anlegen.';
   f.onsubmit = async function (ev) {
     ev.preventDefault(); fe.textContent = '';
     if (f.passwort.value !== f.passwort2.value) { fe.textContent = 'Die Passwörter sind nicht gleich.'; return; }
-    const r = await fetch('/api/einrichten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name.value, email: f.email.value, passwort: f.passwort.value }) });
+    const r = await fetch('/api/einrichten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name.value, email: f.email.value, passwort: f.passwort.value, code: f.code.value }) });
     const j = await r.json().catch(function () { return {}; });
     if (!r.ok) { fe.textContent = j.fehler || 'Fehler'; return; }
     location.href = '/';

@@ -40,7 +40,24 @@ class Fehler extends Error { constructor(code, text) { super(text); this.code = 
 function json(res, code, daten, kopf) { res.writeHead(code, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, kopf || {})); res.end(JSON.stringify(daten)); }
 function roh(req, grenze) { return new Promise(function (ok, nein) { const teile = []; let n = 0; req.on('data', function (c) { n += c.length; if (n > grenze) { nein(new Fehler(413, 'Datei zu groß')); req.destroy(); } else teile.push(c); }); req.on('end', function () { ok(Buffer.concat(teile)); }); req.on('error', nein); }); }
 async function leib(req) { const b = await roh(req, 15e6); try { return JSON.parse(b.toString('utf8') || '{}'); } catch (e) { return {}; } }
-const lokal = req => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+// Hinter einem Webserver (Caddy, STAFFCLEAN_PROXY=1) kommt JEDE Anfrage von 127.0.0.1 — „direkt am Rechner" gilt
+// dort also nie, und die echte Adresse steht in X-Forwarded-For (nur vom eigenen Proxy übernommen).
+const HINTER_PROXY = process.env.STAFFCLEAN_PROXY === '1';
+const vomRechner = req => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const lokal = req => !HINTER_PROXY && vomRechner(req);
+const adresse = req => (HINTER_PROXY && vomRechner(req) && req.headers['x-forwarded-for']) ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : req.socket.remoteAddress;
+// Einrichtungscode: im Netz lässt sich das erste Büro-Konto nur mit diesem Code anlegen. Er steht beim Start im
+// Server-Protokoll (Deploy-Log bei GitHub, nur für Manuel sichtbar) und verfällt, sobald das Konto angelegt ist.
+let einrichtungscode = null;
+function einrichtungscodePruefen() {
+  const offen = !db.prepare("SELECT COUNT(*) n FROM benutzer WHERE rolle = 'buero'").get().n;
+  if (offen && HINTER_PROXY && !einrichtungscode) {
+    const z = require('crypto').randomBytes(5).toString('hex').toUpperCase();
+    einrichtungscode = z.slice(0, 5) + '-' + z.slice(5);
+    console.log('EINRICHTUNGSCODE für das erste Büro-Konto: ' + einrichtungscode);
+  }
+  if (!offen) einrichtungscode = null;
+}
 const zahl = v => (v === '' || v == null) ? null : (Number(String(v).replace(',', '.')) || null);
 
 function fotoSpeichern(daten, praefix) {
@@ -88,16 +105,24 @@ async function pdfSenden(res, r, download) {
 
 // ---------------------------------------------------------------- Öffentlich (ohne Anmeldung)
 async function oeffentlich(req, res, p, q) {
-  if (p === '/api/einrichten' && req.method === 'GET') return json(res, 200, { noetig: !db.prepare("SELECT COUNT(*) n FROM benutzer WHERE rolle = 'buero'").get().n, lokal: lokal(req) });
+  if (p === '/api/einrichten' && req.method === 'GET') { einrichtungscodePruefen(); return json(res, 200, { noetig: !db.prepare("SELECT COUNT(*) n FROM benutzer WHERE rolle = 'buero'").get().n, lokal: lokal(req), mitCode: !!einrichtungscode }); }
   if (p === '/api/einrichten' && req.method === 'POST') {
     if (db.prepare("SELECT COUNT(*) n FROM benutzer WHERE rolle = 'buero'").get().n) throw new Fehler(409, 'Es gibt schon ein Büro-Konto.');
-    if (!lokal(req)) throw new Fehler(403, 'Das erste Konto lässt sich nur direkt am Rechner anlegen.');
     const b = await leib(req); let id;
+    if (!lokal(req)) {
+      einrichtungscodePruefen();
+      const schl = 'e|' + adresse(req);
+      if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
+      const gegeben = String(b.code || '').trim().toUpperCase();
+      const ok = einrichtungscode && gegeben.length === einrichtungscode.length && require('crypto').timingSafeEqual(Buffer.from(gegeben), Buffer.from(einrichtungscode));
+      if (!ok) { Z.fehlversuch(db, schl); throw new Fehler(403, einrichtungscode ? 'Der Einrichtungscode stimmt nicht.' : 'Das erste Konto lässt sich nur direkt am Rechner anlegen.'); }
+    }
     try { id = Z.kontoAnlegen(db, Object.assign({}, b, { rolle: 'buero' })); } catch (e) { throw new Fehler(400, e.message); }
+    einrichtungscode = null;
     const s = Z.sitzungAnlegen(db, 'buero', id); return json(res, 200, { ok: true }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
   }
   if (p === '/api/anmelden' && req.method === 'POST') {
-    const b = await leib(req); const email = String(b.email || '').trim().toLowerCase(); const schl = 'k|' + req.socket.remoteAddress + '|' + email;
+    const b = await leib(req); const email = String(b.email || '').trim().toLowerCase(); const schl = 'k|' + adresse(req) + '|' + email;
     if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
     const u = db.prepare('SELECT * FROM benutzer WHERE email = ? AND aktiv = 1').get(email);
     if (!u || !Z.pruefen(b.passwort || '', u.pw)) { Z.fehlversuch(db, schl); throw new Fehler(401, 'E-Mail oder Passwort stimmt nicht.'); }
@@ -105,7 +130,7 @@ async function oeffentlich(req, res, p, q) {
   }
   if (p === '/api/app/personen') return json(res, 200, db.prepare("SELECT id, name FROM mitarbeiter WHERE aktiv = 1 AND pin IS NOT NULL AND pin <> '' ORDER BY name").all());
   if (p === '/api/app/anmelden' && req.method === 'POST') {
-    const b = await leib(req); const schl = 'p|' + req.socket.remoteAddress + '|' + Number(b.mitarbeiter_id);
+    const b = await leib(req); const schl = 'p|' + adresse(req) + '|' + Number(b.mitarbeiter_id);
     if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
     const m = db.prepare('SELECT * FROM mitarbeiter WHERE id = ? AND aktiv = 1').get(Number(b.mitarbeiter_id));
     if (!m || !m.pin || !Z.pruefen(String(b.pin || ''), m.pin)) { Z.fehlversuch(db, schl); throw new Fehler(401, 'PIN stimmt nicht.'); }
@@ -592,8 +617,18 @@ const server = http.createServer(async function (req, res) {
 });
 // Automatischer Abrechnungslauf: prüft alle 30 Minuten, ob der eingestellte Tag erreicht ist (einmal je Monat, Vormonat)
 function automatik() { try { const l = AB.autoLauf(db); if (l) console.log('Abrechnungslauf ' + l.monat + ': ' + l.angelegt.length + ' angelegt, ' + l.gestellt.length + ' gestellt, ' + l.uebersprungen.length + ' übersprungen'); } catch (e) { console.error('Abrechnungslauf fehlgeschlagen:', e.message); } }
+// Tägliche Sicherung der Datenbank nach daten/sicherung (VACUUM INTO = konsistente Kopie im laufenden Betrieb), 14 Tage
+function sicherung() {
+  try {
+    const ordner = path.join(DB.ORDNER, 'sicherung'); fs.mkdirSync(ordner, { recursive: true });
+    const ziel = path.join(ordner, 'staffclean-' + heute() + '.sqlite');
+    if (!fs.existsSync(ziel)) { db.exec("VACUUM INTO '" + ziel.replace(/'/g, "''") + "'"); console.log('Sicherung geschrieben: ' + ziel); }
+    fs.readdirSync(ordner).filter(function (f) { return /^staffclean-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f); }).sort().reverse().slice(14).forEach(function (f) { fs.unlinkSync(path.join(ordner, f)); });
+  } catch (e) { console.error('Sicherung fehlgeschlagen:', e.message); }
+}
 if (require.main === module) {
-  server.listen(PORT, HOST, function () { console.log('Glanzwerk läuft: http://' + HOST + ':' + PORT + '  ·  App /app  ·  Kunde /kunde'); });
+  server.listen(PORT, HOST, function () { console.log('Glanzwerk läuft: http://' + HOST + ':' + PORT + '  ·  App /app  ·  Kunde /kunde' + (HINTER_PROXY ? '  ·  hinter Webserver' : '')); einrichtungscodePruefen(); });
   automatik(); setInterval(automatik, 30 * 60000).unref();
+  sicherung(); setInterval(sicherung, 60 * 60000).unref();   // stündlich nachsehen, einmal je Tag schreiben
 }
 module.exports = { server, db };
