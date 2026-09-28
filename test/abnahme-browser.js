@@ -112,6 +112,9 @@ async function buero1(b) {
   await schublade(s, { bezeichnung: 'Glasreinigung', art: 'je_ausfuehrung', turnus: '1 M', preis: '53.50', einheit: 'Durchgang' }); await meldungIst(s, /Baustein gespeichert/, 'Glasreinigung je Durchgang (1 M)');
   erwartet(); await klick(s, '#neuBaustein', '+ Baustein ohne Turnus'); await schublade(s, { bezeichnung: 'Glas ohne Turnus', art: 'je_ausfuehrung', turnus: '', preis: '10' }); await meldungIst(s, /Turnus/, 'Baustein „je Durchgang" ohne Turnus abgelehnt'); await s.click('#schublade #abbrechen');
   await klick(s, '#neuBaustein', '+ Winterdienst'); await schublade(s, { bezeichnung: 'Winterdienst Zuwegung', art: 'monatlich', monate: '11,12,1,2,3', preis: '90', einheit: 'Monat' }); await meldungIst(s, /Baustein gespeichert/, 'Winterdienst nur Nov–März');
+  await klick(s, '#neuBaustein', '+ Baustein zum Entfernen'); await schublade(s, { bezeichnung: 'Probeposten', art: 'einmalig', preis: '1' }); await meldungIst(s, /Baustein gespeichert/, 'Probeposten angelegt');
+  await s.locator('tr', { hasText: 'Probeposten' }).locator('[data-bsweg]').click(); await ruhig(s); await meldungIst(s, /Baustein entfernt/, 'Preisbaustein entfernen');
+  if (/Probeposten/.test(await s.textContent('#bausteine'))) throw new Error('Baustein nicht entfernt'); ok('Probeposten ist weg');
   await s.locator('[data-bs]').first().click(); await schublade(s, { preis: '53.50' }); await meldungIst(s, /Baustein gespeichert/, 'Baustein ändern');
   erwartet(); await s.fill('[name=zielpreis]', '1'); await klick(s, '#kalibrieren', 'Zielpreis 1 € (zu niedrig)'); await meldungIst(s, /Wegezeit/, 'Zielpreis unter Wegezeit abgelehnt');
   await s.fill('[name=zielpreis]', '236.25'); await klick(s, '#kalibrieren', 'Richtzeiten-Vorschau für 236,25 €');
@@ -124,6 +127,9 @@ async function buero1(b) {
   if (!/Monatlich brutto/.test(atext) || /Verrechnungssatz|Lohnkosten|Selbstkosten|Gewinn/.test(atext)) throw new Error('Angebot: Preis fehlt oder interne Zahlen sichtbar'); ok('Angebot druckbar, ohne interne Kalkulation'); await bild(angebot, 'b06-angebot'); await angebot.close();
   // Standort + QR
   await klick(s, '[data-reiter=standort]', 'Reiter Standort & QR'); await s.fill('[name=lat]', '54.3233'); await s.fill('[name=lon]', '10.1228'); await klick(s, '#standortSpeichern', 'Standort speichern'); await meldungIst(s, /Standort gespeichert/, 'Standort gesetzt');
+  await klick(s, '#standortSuchen', 'Standort aus Anschrift ermitteln'); await meldungIst(s, /Gefunden: Prüfweg 1/, 'Adresssuche (Testdienst) → Standort gesetzt');
+  await klick(s, '[data-reiter=standort]', 'Reiter Standort erneut'); if (!/54,32|54\.32/.test(await s.textContent('#oBereich'))) throw new Error('Standort aus Adresssuche nicht übernommen'); ok('Koordinaten aus der Adresssuche am Objekt');
+  await s.fill('[name=lat]', '54.3233'); await s.fill('[name=lon]', '10.1228'); await klick(s, '#standortSpeichern', 'Standort zurücksetzen'); await meldungIst(s, /Standort gespeichert/, 'Standort wieder gesetzt');
   await klick(s, '[data-reiter=standort]', 'Reiter Standort erneut'); const qrOk = await s.locator('img[src^="/api/qr"]').first().evaluate(i => i.complete && i.naturalWidth > 0); if (!qrOk) throw new Error('QR-Bild lädt nicht'); ok('QR-Vorschau lädt');
   const [qr] = await Promise.all([ctx.waitForEvent('page'), s.click('.karte a[href^="/drucken/qr"]')]); await beobachten(qr, 'QR-Druck'); await ruhig(qr); if (await qr.locator('.etikett').count() !== 2) throw new Error('QR-Druck: falsche Anzahl Etiketten'); ok('QR-Aufkleber: 2 Etiketten'); await bild(qr, 'b07-qr-druck'); await qr.close();
   // Team, Mangel, Prüfung
@@ -312,6 +318,13 @@ async function abrechnen(b) {
   await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   if (!/Grundreinigung Flur/.test(await s.textContent('#inhalt'))) throw new Error('Sonderleistung nach Storno nicht wieder abrechenbar'); ok('nach Storno: Sonderleistung wieder im Entwurf');
   await klick(s, '#reStellen', 'Korrigierte Rechnung stellen'); await meldungIst(s, /Gestellt: RE-\d{4}-0003/, 'Rechnung RE-…-0003 gestellt');
+  // Entwurf löschen: Entwurf für den Vormonat anlegen und wieder verwerfen
+  await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen');
+  const vm = new Date(); vm.setDate(1); vm.setMonth(vm.getMonth() - 1); await s.fill('#abMonat', vm.toISOString().slice(0, 7));
+  await klick(s, '#abErzeugen', 'Entwürfe für den Vormonat'); await meldungIst(s, /Entwürfe angelegt/, 'Vormonats-Entwurf'); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen');
+  await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
+  await klick(s, '#reLoeschen', 'Entwurf löschen'); await meldungIst(s, /Entwurf gelöscht/, 'Entwurf gelöscht'); await s.waitForURL(/#abrechnung$/);
+  if (await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).count()) throw new Error('Entwurf noch in der Liste'); ok('Entwurf ist aus der Liste verschwunden, Nummernkreis unberührt');
   await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/);
   // Kunde sieht Rechnungen, kann ansehen und XRechnung laden
   await s.fill('[name=email]', 'kunde@abnahme.test'); await s.fill('[name=passwort]', 'Kunde-Abnahme-1'); await s.click('#los'); await s.waitForURL(/\/kunde/); await ruhig(s);
@@ -351,7 +364,10 @@ async function buero2(b) {
 
 (async function () {
   const mitWebkit = process.argv.includes('--webkit');
-  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { STAFFCLEAN_PORT: String(PORT), STAFFCLEAN_DATEN: DATEN }), stdio: ['ignore', 'pipe', 'pipe'] });
+  // Attrappe der Adresssuche (Nominatim-Schnittstelle), damit die Abnahme ohne Internet und ohne fremden Dienst läuft
+  const attrappe = require('http').createServer(function (q, a) { const s = decodeURIComponent((q.url.split('q=')[1] || '').replace(/\+/g, ' ')); a.writeHead(200, { 'Content-Type': 'application/json' }); a.end(JSON.stringify(/Prüfweg/.test(s) ? [{ lat: '54.3240', lon: '10.1300', display_name: 'Prüfweg 1, 24103 Kiel, Schleswig-Holstein, Deutschland' }] : [])); });
+  await new Promise(ok => attrappe.listen(0, '127.0.0.1', ok));
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { STAFFCLEAN_PORT: String(PORT), STAFFCLEAN_DATEN: DATEN, STAFFCLEAN_ADRESSSUCHE: 'http://127.0.0.1:' + attrappe.address().port }), stdio: ['ignore', 'pipe', 'pipe'] });
   let srvLog = ''; srv.stdout.on('data', d => { srvLog += d; }); srv.stderr.on('data', d => { srvLog += d; });
   for (let i = 0; i < 50 && !/läuft/.test(srvLog); i++) await new Promise(r => setTimeout(r, 100));
   let b;
@@ -373,7 +389,7 @@ async function buero2(b) {
       fehler.push('Seite beim Abbruch: ' + letzteSeite.url() + ' · ' + JSON.stringify(await letzteSeite.evaluate(() => [window.__m, (document.getElementById('meldung') || {}).outerHTML]).catch(() => null)));
     }
   }
-  finally { if (b) await b.close().catch(() => {}); srv.kill(); }
+  finally { if (b) await b.close().catch(() => {}); srv.kill(); attrappe.close(); }
   if (/Error|TypeError/.test(srvLog)) fehler.push('Server-Protokoll: ' + srvLog.split('\n').filter(l => /Error/.test(l)).slice(0, 3).join(' | '));
   fs.writeFileSync(path.join(BILDER, 'protokoll.txt'), protokoll.join('\n') + '\n\nFEHLER:\n' + (fehler.join('\n') || 'keine') + '\n');
   console.log(protokoll.join('\n'));
