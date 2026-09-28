@@ -28,5 +28,7 @@ window.UI = (function () {
     kamera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
     pfeil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'
   };
-  return { $, $$, esc, holen, meldung, heute, datumDe, tagLang, montagVon, plusTage, ICON };
+  // Wer ist angemeldet? null = niemand. Liest die Antwort immer ganz aus, damit keine Verbindung offen bleibt.
+  async function ich() { try { const r = await fetch('/api/ich'); const j = await r.json().catch(() => null); return r.ok ? j : null; } catch (e) { return null; } }
+  return { $, $$, esc, holen, ich, meldung, heute, datumDe, tagLang, montagVon, plusTage, ICON };
 })();

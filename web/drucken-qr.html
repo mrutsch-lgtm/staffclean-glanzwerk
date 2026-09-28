@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR-Aufkleber · Glanzwerk</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>@page { size: A4; margin: 12mm; } body { background: #fff; }</style>
+</head>
+<body>
+<div class="druck">
+  <div class="briefkopf"><img src="/bilder/logo-dunkel.webp" alt="StaffClean"><div style="text-align:right"><div class="ueberzeile">QR-Aufkleber</div><h2 id="name" style="margin:0">…</h2></div></div>
+  <p class="leise klein">Je Raum ein Aufkleber, gut sichtbar neben der Tür anbringen. Wer ihn in der App scannt, landet direkt im Raum — die Erledigung zählt dann als vor Ort bestätigt.</p>
+  <div class="aufkleber" id="liste"></div>
+</div>
+<button class="knopf druckknopf" onclick="print()">Drucken</button>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { $, esc, holen } = UI;
+  const id = new URLSearchParams(location.search).get('objekt');
+  try {
+    const o = await holen('/api/objekt?id=' + encodeURIComponent(id));
+    document.title = 'QR-Aufkleber ' + o.name; $('#name').textContent = o.name;
+    $('#liste').innerHTML = o.raeume.map(function (r) { return '<div class="etikett"><img class="marke" src="/bilder/logo-dunkel.webp" alt=""><img class="qr" src="/api/qr?raum=' + r.id + '" alt="QR"><b>' + esc(r.name) + '</b><small>' + esc([r.etage, o.name].filter(Boolean).join(' · ')) + '<br>' + esc(r.code || '') + '</small></div>'; }).join('') || '<div class="leer">Keine Räume.</div>';
+  } catch (e) { $('#liste').innerHTML = '<div class="hinweis">' + esc(e.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

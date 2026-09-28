@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#022c22">
+<title>Glanzwerk · Einrichten</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>
+  body { min-height: 100vh; display: grid; place-items: center; background: linear-gradient(160deg, var(--gruen-850), var(--gruen-950) 70%); }
+  .kasten { width: min(460px, calc(100% - 2rem)); background: var(--flaeche); border-radius: 22px; padding: 2rem 1.8rem; box-shadow: var(--schatten-hoch); }
+  .kasten img { height: 54px; margin: 0 auto 1rem; }
+  .kasten form { display: grid; gap: .9rem; }
+  .fehler { color: var(--rot); font-size: .9rem; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<div class="kasten">
+  <img src="/bilder/logo-dunkel.webp" alt="StaffClean">
+  <h2 style="text-align:center">Glanzwerk einrichten</h2>
+  <p class="leise" style="text-align:center">Einmalig: das erste Büro-Konto anlegen. Das Passwort wählst du selbst, es wird nirgends gespeichert außer als Prüfwert.</p>
+  <form id="form">
+    <label class="feld">Name<input name="name" required></label>
+    <label class="feld">E-Mail<input type="email" name="email" autocomplete="username" required></label>
+    <label class="feld">Passwort (mind. 10 Zeichen)<input type="password" name="passwort" autocomplete="new-password" minlength="10" required></label>
+    <label class="feld">Passwort wiederholen<input type="password" name="passwort2" autocomplete="new-password" required></label>
+    <div class="fehler" id="fehler"></div>
+    <button class="knopf" type="submit">Konto anlegen</button>
+  </form>
+</div>
+<script>
+(async function () {
+  const f = document.getElementById('form'), fe = document.getElementById('fehler');
+  const e = await (await fetch('/api/einrichten')).json();
+  if (!e.noetig) { location.href = '/anmelden'; return; }
+  if (!e.lokal) fe.textContent = 'Das erste Konto lässt sich nur direkt am Rechner anlegen.';
+  f.onsubmit = async function (ev) {
+    ev.preventDefault(); fe.textContent = '';
+    if (f.passwort.value !== f.passwort2.value) { fe.textContent = 'Die Passwörter sind nicht gleich.'; return; }
+    const r = await fetch('/api/einrichten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name.value, email: f.email.value, passwort: f.passwort.value }) });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) { fe.textContent = j.fehler || 'Fehler'; return; }
+    location.href = '/';
+  };
+})();
+</script>
+</body>
+</html>

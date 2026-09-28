@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prüfbericht · StaffClean</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>@page { size: A4; margin: 16mm 14mm; } body { background: #fff; } .tabelle td, .tabelle th { font-size: .85rem; }</style>
+</head>
+<body>
+<div class="druck">
+  <div class="briefkopf"><img src="/bilder/logo-dunkel.webp" alt="StaffClean"><div style="text-align:right"><div class="ueberzeile">Qualitätsprüfung</div><div id="datum" class="klein"></div></div></div>
+  <h1 id="name" style="color:var(--gruen-900);font-size:2rem;margin:.2rem 0">…</h1>
+  <div class="raster k3" id="kopfzahlen" style="margin:1rem 0"></div>
+  <p class="leise klein">Verfahren angelehnt an DIN EN 13549: Stichprobe der Räume nach Objektgröße, je Raum feste Prüfelemente. Qualitätswert = Anteil der Prüfelemente ohne Beanstandung.</p>
+  <table class="tabelle" id="raeume"></table>
+  <div id="bemerkung" style="margin-top:1rem"></div>
+  <div class="raster k2" style="margin-top:3rem"><div style="border-top:1px solid #333;padding-top:.3rem" class="klein">Prüfer: <span id="pruefer"></span></div><div style="border-top:1px solid #333;padding-top:.3rem" class="klein">Kunde: <span id="kunde"></span></div></div>
+</div>
+<button class="knopf druckknopf" onclick="print()">Drucken</button>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { $, esc, holen, datumDe } = UI;
+  const id = encodeURIComponent(new URLSearchParams(location.search).get('id'));
+  try {
+    const ich = await holen('/api/ich');
+    const p = await holen((ich.rolle === 'kunde' ? '/api/kunde/pruefung?id=' : '/api/pruefung?id=') + id);
+    document.title = 'Prüfbericht ' + p.objekt + ' ' + datumDe(p.datum);
+    $('#name').textContent = p.objekt; $('#datum').textContent = datumDe(p.datum);
+    const k = n => '<div class="karte kennzahl" style="box-shadow:none"><div class="zahl">' + esc(n[0]) + '</div><div class="etikett">' + esc(n[1]) + '</div></div>';
+    const elemente = p.raeume.reduce(function (a, r) { return a + r.kriterien.filter(function (x) { return x.ok !== null; }).length; }, 0), fehler = p.raeume.reduce(function (a, r) { return a + (r.fehler || 0); }, 0);
+    $('#kopfzahlen').innerHTML = k([p.ergebnis != null ? String(p.ergebnis).replace('.', ',') + ' %' : 'offen', 'Qualitätswert']) + k([p.raeume.length, 'Räume in der Stichprobe']) + k([fehler + ' / ' + elemente, 'beanstandete Prüfelemente']);
+    $('#raeume').innerHTML = '<thead><tr><th>Raum</th><th>Prüfelemente</th><th style="text-align:right">Beanstandet</th></tr></thead><tbody>' + p.raeume.map(function (r) { return '<tr><td><b>' + esc(r.name) + '</b></td><td>' + r.kriterien.filter(function (x) { return x.ok !== null; }).map(function (x) { return x.ok ? '✓ ' + esc(x.element) : '<b style="color:var(--rot)">✗ ' + esc(x.element) + '</b>'; }).join(' · ') + '</td><td style="text-align:right">' + (r.fehler || 0) + '</td></tr>'; }).join('') + '</tbody>';
+    if (p.bemerkung) $('#bemerkung').innerHTML = '<b>Bemerkung:</b> ' + esc(p.bemerkung);
+    $('#pruefer').textContent = p.pruefer || ''; $('#kunde').textContent = p.abgezeichnet_von ? p.abgezeichnet_von + ', abgezeichnet am ' + datumDe(String(p.abgezeichnet_am).slice(0, 10)) : '';
+  } catch (x) { document.querySelector('.druck').innerHTML = '<div class="hinweis">' + esc(x.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

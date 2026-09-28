@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Angebot · StaffClean</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>@page { size: A4; margin: 16mm 14mm; } body { background: #fff; } .tabelle td, .tabelle th { font-size: .85rem; } .summe td { font-weight: 800; border-top: 2px solid var(--gruen-700); }</style>
+</head>
+<body>
+<div class="druck">
+  <div class="briefkopf"><img src="/bilder/logo-dunkel.webp" alt="StaffClean"><div style="text-align:right" class="klein" id="firma"></div></div>
+  <div class="ueberzeile">Angebot Unterhaltsreinigung</div>
+  <h1 id="name" style="color:var(--gruen-900);font-size:2rem;margin:.2rem 0">…</h1>
+  <p class="leise" id="anschrift"></p>
+  <p>Gern bieten wir Ihnen die regelmäßige Reinigung Ihres Objekts an. Grundlage ist das folgende Leistungsverzeichnis — jede Leistung mit ihrem Turnus. Die Ausführung weisen wir digital nach: Im Kundenportal sehen Sie jederzeit, was wann erledigt wurde, und erhalten regelmäßige Qualitätsprüfungen zum Abzeichnen.</p>
+  <h3 style="margin-top:1.5rem">Leistungsverzeichnis</h3>
+  <table class="tabelle" id="lv"></table>
+  <h3 style="margin-top:1.5rem">Preis</h3>
+  <table class="tabelle" id="preis" style="max-width:460px"></table>
+  <p class="leise klein" style="margin-top:1rem" id="fuss">Feiertage sind im Turnus berücksichtigt. Leistungen „bei Bedarf" werden nach Aufwand gesondert beauftragt. Dieses Angebot gilt 30 Tage.</p>
+</div>
+<button class="knopf druckknopf" onclick="print()">Drucken</button>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { $, esc, holen, datumDe, heute } = UI;
+  const id = new URLSearchParams(location.search).get('objekt');
+  const euro = v => (Number(v) || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+  try {
+    const [o, k, e] = await Promise.all([holen('/api/objekt?id=' + encodeURIComponent(id)), holen('/api/kalkulation?objekt=' + encodeURIComponent(id)), holen('/api/einstellungen')]);
+    document.title = 'Angebot ' + o.name;
+    $('#firma').innerHTML = '<b>' + esc(e.firma_name || 'StaffClean GmbH') + '</b><br>' + esc(datumDe(heute()));
+    $('#name').textContent = o.name; $('#anschrift').textContent = [o.kunde, o.strasse, [o.plz, o.ort].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+    const pos = {}; o.positionen.forEach(function (p) { pos[p.raum_id + '|' + p.taetigkeit_id] = p; });
+    $('#lv').innerHTML = '<thead><tr><th>Raum</th><th>Leistung</th><th>Turnus</th></tr></thead><tbody>' + o.raeume.map(function (r) {
+      const l = o.taetigkeiten.filter(function (t) { return pos[r.id + '|' + t.id]; });
+      return l.map(function (t, i) { return '<tr>' + (i === 0 ? '<td rowspan="' + l.length + '"><b>' + esc(r.name) + '</b>' + (r.flaeche_m2 ? '<br><span class="leise klein">' + String(r.flaeche_m2).replace('.', ',') + ' m²</span>' : '') + '</td>' : '') + '<td>' + esc(t.name) + (t.anleitung ? '<br><span class="leise klein">' + esc(t.anleitung) + '</span>' : '') + '</td><td>' + esc(pos[r.id + '|' + t.id].regel) + '</td></tr>'; }).join('');
+    }).join('') + '</tbody>';
+    const netto = o.monatspreis || k.ergebnis.monatspreis, ust = Math.round(netto * 19) / 100;
+    $('#preis').innerHTML = '<tbody><tr><td>Monatliche Pauschale (netto)</td><td style="text-align:right">' + euro(netto) + '</td></tr><tr><td>zzgl. 19 % Umsatzsteuer</td><td style="text-align:right">' + euro(ust) + '</td></tr><tr class="summe"><td>Monatlich brutto</td><td style="text-align:right">' + euro(netto + ust) + '</td></tr></tbody>';
+  } catch (x) { document.querySelector('.druck').innerHTML = '<div class="hinweis">' + esc(x.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

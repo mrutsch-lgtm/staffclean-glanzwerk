@@ -4,27 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#022c22">
-<title>StaffClean · Planung</title>
+<title>Glanzwerk · StaffClean</title>
 <link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
 <link rel="preload" href="/schrift/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/stil.css">
 </head>
 <body>
 <div class="leiste"><div class="innen">
-  <span class="ausblenden">Gebäudereinigung in Schleswig-Holstein &amp; Hamburg</span>
-  <span class="pille"><span class="punkt"></span><span id="leisteDatum">heute</span></span>
+  <span class="ausblenden"><b>Glanzwerk</b> · Planung und Nachweise für die Gebäudereinigung</span>
+  <span style="display:flex;gap:.5rem;align-items:center"><span class="pille"><span class="punkt"></span><span id="leisteDatum">heute</span></span><span class="pille" id="leisteName">…</span><button class="pille" id="abmelden" style="cursor:pointer">Abmelden</button></span>
 </div></div>
 <header class="kopf"><div class="innen">
   <a href="#uebersicht"><img class="logo" src="/bilder/logo-hell.webp" alt="StaffClean"></a>
   <nav class="nav" id="nav">
     <a href="#uebersicht" data-v="uebersicht">Übersicht</a>
+    <a href="#dienstplan" data-v="dienstplan">Dienstplan</a>
     <a href="#objekte" data-v="objekte">Objekte</a>
     <a href="#tagesplan" data-v="tagesplan">Tagesplan</a>
-    <a href="#import" data-v="import">LV-Import</a>
+    <a href="#einsatz" data-v="einsatz">Einsatz</a>
+    <a href="#qualitaet" data-v="qualitaet">Qualität</a>
+    <a href="#zeiten" data-v="zeiten">Zeiten &amp; Lohn</a>
     <a href="#mitarbeiter" data-v="mitarbeiter">Mitarbeiter</a>
+    <a href="#kunden" data-v="kunden">Kunden</a>
     <a href="#maengel" data-v="maengel">Mängel</a>
+    <a href="#stammdaten" data-v="stammdaten">Stammdaten</a>
   </nav>
-  <div class="rechts"><a class="knopf klein" href="/app" target="_blank">Mitarbeiter-App</a></div>
 </div></header>
 <section class="titelband"><div class="innen" id="titel"></div></section>
 <main class="seite" id="inhalt"></main>
