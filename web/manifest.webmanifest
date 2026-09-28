@@ -1,5 +1,5 @@
 {
-  "name": "Glanzwerk · StaffClean",
+  "name": "Glanzwerk",
   "short_name": "Glanzwerk",
   "start_url": "/app",
   "scope": "/",
@@ -7,5 +7,18 @@
   "background_color": "#022c22",
   "theme_color": "#022c22",
   "lang": "de",
-  "icons": [{ "src": "/bilder/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [
+    {
+      "src": "/bilder/glanzwerk-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/bilder/glanzwerk-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
 }

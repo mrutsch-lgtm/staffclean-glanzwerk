@@ -3,29 +3,27 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#022c22">
 <title>Glanzwerk · Anmelden</title>
-<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/bilder/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/bilder/apple-touch-icon.png">
 <link rel="stylesheet" href="/css/stil.css">
-<style>
-  body { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(900px 500px at 80% -10%, rgba(16,185,129,.35), transparent 60%), linear-gradient(160deg, var(--gruen-850), var(--gruen-950) 70%); }
-  .kasten { width: min(420px, calc(100% - 2rem)); background: var(--flaeche); border-radius: 22px; padding: 2rem 1.8rem; box-shadow: var(--schatten-hoch); }
-  .kasten img { height: 54px; margin: 0 auto 1.2rem; }
-  .kasten form { display: grid; gap: .9rem; }
-  .fehler { color: var(--rot); font-size: .9rem; min-height: 1.2em; }
-</style>
 </head>
-<body>
+<body class="eingang">
+<div class="buehne">
+  <img class="wortmarke" src="/bilder/glanzwerk-logo-hell.png" alt="Glanzwerk" width="763" height="165">
+  <p class="claim">Planung, Nachweise und Abrechnung für die Gebäudereinigung</p>
+  <div class="funken"><span>Einsätze</span><span>Qualität</span><span>Abrechnung</span><span>Personal</span></div>
+</div>
 <div class="kasten">
-  <img src="/bilder/logo-dunkel.webp" alt="StaffClean">
-  <div class="ueberzeile" style="text-align:center">Glanzwerk</div>
-  <h2 style="text-align:center;margin-bottom:1.2rem" id="ueber">Anmelden</h2>
+  <h2 id="ueber">Anmelden</h2>
+  <p class="unter">Mit deinem Glanzwerk-Konto</p>
   <form id="form">
     <label class="feld">E-Mail<input type="email" name="email" autocomplete="username" required></label>
     <label class="feld">Passwort<input type="password" name="passwort" autocomplete="current-password" required></label>
     <div class="fehler" id="fehler"></div>
-    <button class="knopf" type="submit" id="los">Anmelden</button>
+    <button class="knopf" type="submit" id="los">Bei Glanzwerk anmelden</button>
   </form>
-  <p class="leise klein" style="text-align:center;margin-top:1.2rem">Mitarbeiter? <a href="/app">Zur App mit PIN</a></p>
 </div>
+<p class="fuss">Mitarbeiter? <a href="/app">Zur Glanzwerk-App mit PIN</a></p>
 <script src="/js/ui.js"></script>
 <script>
 (async function () {
