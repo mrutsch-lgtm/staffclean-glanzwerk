@@ -270,9 +270,10 @@ async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/raum' && req.method === 'POST') {
     const b = await leib(req);
     if (!b.objekt_id || !String(b.name || '').trim()) throw new Fehler(400, 'Objekt und Name nötig');
-    if (b.id) { db.prepare('UPDATE raum SET name=?, etage=?, belag=?, flaeche_m2=? WHERE id=?').run(b.name, b.etage || null, b.belag || null, zahl(b.flaeche_m2), Number(b.id)); return json(res, 200, { ok: true }); }
+    const anzahl = zahl(b.anzahl) || 1; if (anzahl < 0 || anzahl > 500) throw new Fehler(400, 'Anzahl zwischen 1 und 500');
+    if (b.id) { db.prepare('UPDATE raum SET name=?, etage=?, belag=?, flaeche_m2=?, anzahl=? WHERE id=?').run(b.name, b.etage || null, b.belag || null, zahl(b.flaeche_m2), anzahl, Number(b.id)); return json(res, 200, { ok: true }); }
     const n = db.prepare('SELECT COALESCE(MAX(reihenfolge),0)+1 n FROM raum WHERE objekt_id = ?').get(Number(b.objekt_id)).n;
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO raum (objekt_id, name, etage, belag, flaeche_m2, reihenfolge, code) VALUES (?,?,?,?,?,?,?)').run(Number(b.objekt_id), b.name, b.etage || null, b.belag || null, zahl(b.flaeche_m2), n, 'R' + b.objekt_id + '-' + n + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()).lastInsertRowid) });
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO raum (objekt_id, name, etage, belag, flaeche_m2, anzahl, reihenfolge, code) VALUES (?,?,?,?,?,?,?,?)').run(Number(b.objekt_id), b.name, b.etage || null, b.belag || null, zahl(b.flaeche_m2), anzahl, n, 'R' + b.objekt_id + '-' + n + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()).lastInsertRowid) });
   }
   if (p === '/api/taetigkeiten') return json(res, 200, db.prepare('SELECT t.*, (SELECT COUNT(*) FROM lv_position p WHERE p.taetigkeit_id = t.id) verwendet FROM taetigkeit t ORDER BY t.kategorie, t.name').all());
   if (p === '/api/taetigkeit' && req.method === 'GET') { const t = db.prepare('SELECT * FROM taetigkeit WHERE id = ?').get(Number(q.get('id'))); if (!t) throw new Fehler(404, 'Tätigkeit nicht gefunden'); t.uebersetzungen = db.prepare('SELECT * FROM uebersetzung WHERE taetigkeit_id = ?').all(t.id); return json(res, 200, t); }

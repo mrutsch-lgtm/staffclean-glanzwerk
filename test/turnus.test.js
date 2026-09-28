@@ -52,3 +52,20 @@ test('Bedarf, Wochentagsliste, unbekannt', function () {
   assert.ok(an('14T', '2026-09-28') && !an('14T', '2026-10-05') && an('14T', '2026-10-12'));
   assert.ok(an('1 Q', '2026-10-05') && !an('1 Q', '2026-11-02'));
 });
+
+test('Kürzel aus Wettbewerber-LVs: n-ter Wochentag, jN, feste Monate, Sichtreinigung, Legende', function () {
+  const T = require('../lib/turnus');
+  const jahr = (k) => { const r = T.lesen(k, 1), t = []; for (let d = new Date('2026-01-01T12:00:00Z'); d.getUTCFullYear() === 2026; d.setUTCDate(d.getUTCDate() + 1)) { const s = d.toISOString().slice(0, 10); if (T.faellig(r, s, 'SH').an) t.push(s); } return t; };
+  assert.deepStrictEqual(jahr('1. Mi').slice(9, 11), ['2026-10-07', '2026-11-04']);
+  assert.strictEqual(jahr('1. Mi').length, 12);
+  assert.strictEqual(jahr('j2').length, 2); assert.strictEqual(jahr('j4').length, 4); assert.strictEqual(jahr('j6').length, 6);
+  assert.ok([7, 8].includes(jahr('j8').length));
+  assert.deepStrictEqual(jahr('2 J (4,10)'), ['2026-04-13', '2026-10-05']);   // 06.04. ist Ostermontag → nächster Montag
+  assert.strictEqual(T.lesen('S3', 1).sicht, true); assert.strictEqual(T.lesen('2,5', 1).art, 'wechsel');
+  assert.strictEqual(T.lesen('m2', 1).art, 'unbekannt');                      // ohne Legende nicht raten
+  assert.strictEqual(T.ausBeschreibung('14-täglich (gerade Wochen)'), '14T');
+  assert.strictEqual(T.ausBeschreibung('1x monatlich, 1. Mi im Monat'), '1. Mi');
+  assert.strictEqual(T.ausBeschreibung('2x jährlich'), 'j2');
+  assert.strictEqual(T.ausBeschreibung('3x wöchentliche Sichtreinigung'), 'S3');
+  assert.strictEqual(T.ausBeschreibung('irgendwas'), null);
+});

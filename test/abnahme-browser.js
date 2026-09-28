@@ -53,6 +53,19 @@ async function lvDatei() {
   ws.getRow(21).values = ['Bei Bedarf: ', 'Spinnweben entfernen'];
   const f = path.join(DATEN, 'lv.xlsx'); await wb.xlsx.writeFile(f); return f;
 }
+async function wettbewerberDatei() {   // Aufbau „Nr | Räume | Belag | m²", Zwischenzeile, Legende mit eigenen Kürzeln (erfunden)
+  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Tabelle1');
+  ws.getRow(1).values = ['Leistungsverzeichnis Unterhaltsreinigung'];
+  ws.getRow(2).values = [null, 'Objekt:', 'WEG Prüfallee 12a, 24534 Neumünster'];
+  ws.getRow(4).values = ['Nr', 'Räume', 'Belag', 'm²', 'Boden feucht wischen', 'Glas reinigen'];
+  ws.getRow(5).values = [null, 'Erdgeschoss'];
+  ws.getRow(6).values = [1, 'Flur', 'Estrich', 4, '1', 'j2'];
+  ws.getRow(7).values = [2, 'Büro', 'Teppich', '30,47', 'm2', null];
+  ws.getRow(8).values = [null, 'Summe', null, '34,47'];
+  ws.getRow(10).values = [null, 'm2 = 14-täglich (gerade Wochen)'];
+  ws.getRow(11).values = [null, 'j2 = 2x jährlich'];
+  const f = path.join(DATEN, 'lv-wettbewerber.xlsx'); await wb.xlsx.writeFile(f); return f;
+}
 function pngDatei() { const f = path.join(DATEN, 'foto.png'); fs.writeFileSync(f, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAHUlEQVR4nGNkaGBgIAUwkaR6VMOohlENoxqGkgYAO8wBEYy2l4cAAAAASUVORK5CYII=', 'base64')); return f; }
 
 async function buero1(b) {
@@ -142,6 +155,15 @@ async function buero1(b) {
   // Import
   await s.goto(URL0 + '/#import'); await ruhig(s); await s.setInputFiles('#datei', await lvDatei()); await s.locator('#uebernehmen').waitFor(); ok('Excel-LV: Vorschau'); await bild(s, 'b12-import');
   await s.click('#uebernehmen'); await s.waitForURL(/#objekt\/\d+/); await ruhig(s); ok('Excel-LV übernommen → Objekt ' + s.url().split('/').pop());
+  await s.goto(URL0 + '/#import'); await ruhig(s); await s.setInputFiles('#datei', await wettbewerberDatei()); await s.locator('#uebernehmen').waitFor();
+  const vt = await s.textContent('#vorschau');
+  if (!/Prüfallee 12a/.test(vt) || !/Kürzel „m2" laut Legende als „14T"/.test(vt) || !/als Raumfläche übernommen/.test(vt) || /Erdgeschoss<|Summe/.test(await s.innerHTML('#vorschau table'))) throw new Error('Wettbewerber-LV falsch gelesen: ' + vt.slice(0, 300));
+  ok('Wettbewerber-LV: Räume in Spalte 2, m² als Fläche, Legende übersetzt m2 → 14T'); await bild(s, 'b12b-import-wettbewerber');
+  await s.click('#uebernehmen'); await s.waitForURL(/#objekt\/\d+/); await ruhig(s);
+  const rt = await s.textContent('#inhalt'); if (!/30,47 m²/.test(rt)) throw new Error('Fläche nicht am Raum: ' + rt.slice(0, 400)); ok('Fläche 30,47 m² am Raum');
+  await s.locator('[data-raum-edit]').first().click(); await schublade(s, { anzahl: '3' }); await meldungIst(s, /Raum gespeichert/, 'Anzahl 3 Etagen am Raum');
+  if (!/× 3/.test(await s.textContent('#inhalt'))) throw new Error('Anzahl nicht im Raster'); ok('Raster zeigt „× 3"');
+  await klick(s, '[data-reiter=kalk]', 'Kalkulation mit Anzahl'); if (!/ × 3/.test(await s.textContent('#inhalt'))) throw new Error('Kalkulation ohne Anzahl'); ok('Kalkulation rechnet mit „× 3"');
   // Einsatz
   await klick(s, '#nav a[data-v=einsatz]', 'Einsatz öffnen'); await klick(s, '#neuAbw', '+ Abwesenheit');
   const piotr = await s.locator('#schublade [name=mitarbeiter_id] option', { hasText: 'Piotr' }).getAttribute('value');

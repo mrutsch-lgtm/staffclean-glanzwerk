@@ -117,8 +117,9 @@
     });
   }
 
-  let objektReiter = 'lv';
+  let objektReiter = 'lv', letztesObjekt = null;   // Reiter bleibt beim Neuladen desselben Objekts, ein anderes Objekt beginnt beim LV
   async function objekt(id) {
+    if (String(id) !== String(letztesObjekt)) { objektReiter = 'lv'; letztesObjekt = id; }
     const o = await holen('/api/objekt?id=' + id);
     kopf((o.kunde ? o.kunde + ' · ' : '') + [o.strasse, o.ort].filter(Boolean).join(', '), esc(o.name) + (o.status !== 'aktiv' ? ' <span class="marke grau" style="vertical-align:middle">ruht</span>' : ''),
       'Reinigungstag ' + TAGE[o.reinigungstag] + ' · Feiertage ' + esc(o.bundesland) + ' · Stempeln ' + (o.lat != null ? 'im Umkreis von ' + (o.radius_m || 150) + ' m' : '<b>ohne Standort (noch nicht gesetzt)</b>') + (o.zugang ? ' · Zugang: ' + esc(o.zugang) : ''),
@@ -145,7 +146,7 @@
       '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="knopf zweit klein" id="neuRaum">+ Raum</button><select id="neuTaet" style="max-width:260px"><option value="">+ Tätigkeit hinzufügen …</option>' + alle.filter(function (t) { return !spalten.some(function (s) { return s.id === t.id; }); }).map(function (t) { return '<option value="' + t.id + '">' + esc(t.name) + '</option>'; }).join('') + '<option value="neu">Neue Tätigkeit …</option></select></div></div>' +
       (o.raeume.length ? '<div class="scroll"><table class="lv"><thead><tr><th>Raum</th>' + spalten.map(function (t) { return '<th title="' + esc(t.anleitung || '') + '">' + esc(t.name) + (t.minuten ? '<br><span style="font-weight:500;opacity:.8">' + t.minuten + ' Min.</span>' : '') + '</th>'; }).join('') + '</tr></thead><tbody>' +
       o.raeume.map(function (r) {
-        return '<tr><th><span class="raumname" data-raum-edit="' + r.id + '" style="cursor:pointer" title="Raum bearbeiten">' + esc(r.name) + '</span><small>' + esc([r.etage, r.belag, r.flaeche_m2 ? r.flaeche_m2 + ' m²' : ''].filter(Boolean).join(' · ')) + '</small></th>' + spalten.map(function (t) {
+        return '<tr><th><span class="raumname" data-raum-edit="' + r.id + '" style="cursor:pointer" title="Raum bearbeiten">' + esc(r.name) + '</span><small>' + esc([r.etage, r.belag, r.flaeche_m2 ? String(r.flaeche_m2).replace('.', ',') + ' m²' : '', r.anzahl > 1 ? '× ' + String(r.anzahl).replace('.', ',') : ''].filter(Boolean).join(' · ')) + '</small></th>' + spalten.map(function (t) {
           const p = pos[r.id + '|' + t.id];
           return '<td><input class="zelle' + (p ? '' : ' zelle-leer') + '" data-raum="' + r.id + '" data-taet="' + t.id + '" value="' + esc(p ? p.turnus : '') + '" placeholder="–" title="' + esc(p ? p.regel : '') + '"></td>';
         }).join('') + '</tr>';
@@ -167,7 +168,7 @@
     };
   }
   function raumFormular(o, r) {
-    schublade('<h2>' + (r.id ? 'Raum bearbeiten' : 'Neuer Raum') + '</h2><div class="formular" style="margin-top:1rem">' + feld('name', 'Raum', r.name) + feld('etage', 'Etage', r.etage) + feld('belag', 'Bodenbelag', r.belag) + feld('flaeche_m2', 'Fläche m²', r.flaeche_m2) + '</div>' + knoepfe(r.id ? 'Speichern' : 'Anlegen'), function (w) {
+    schublade('<h2>' + (r.id ? 'Raum bearbeiten' : 'Neuer Raum') + '</h2><div class="formular" style="margin-top:1rem">' + feld('name', 'Raum', r.name) + feld('etage', 'Etage', r.etage) + feld('belag', 'Bodenbelag', r.belag) + feld('flaeche_m2', 'Fläche m²', r.flaeche_m2) + feld('anzahl', 'Anzahl gleicher Einheiten (Etagen, Treppenläufe)', r.anzahl || 1, 'number', ' min="1" step="1"') + '</div>' + knoepfe(r.id ? 'Speichern' : 'Anlegen'), function (w) {
       $('#speichern', w).onclick = async function () { const d = formDaten(w); d.objekt_id = o.id; d.id = r.id; try { await holen('/api/raum', d); schubladeZu(); meldung('Raum gespeichert'); route(); } catch (e) { meldung(e.message); } };
     });
   }
@@ -191,7 +192,7 @@
       bereich.innerHTML = '<div class="raster k2"><div class="karte akzentlinie"><div class="ueberzeile">Ergebnis je Monat</div><div class="note gut" style="margin:.3rem 0">' + euro(r.monatspreis) + '</div>' +
         '<table class="tabelle" style="margin-top:.6rem"><tbody>' +
         [['Einsatztage im Monat', r.einsatztageMonat.toLocaleString('de-DE')], ['Leistungszeit', std(r.leistungMinuten)], ['Wegezeit', std(r.wegeMinuten)], ['Stunden gesamt', r.stundenMonat.toLocaleString('de-DE') + ' Std.'],
-         ['Lohnkosten (inkl. Nebenkosten)', euro(r.lohnkosten)], ['Selbstkosten (inkl. Gemeinkosten)', euro(r.selbstkosten)], ['Verrechnungssatz', euro(r.verrechnungssatz) + ' / Std.'], ['Leistungswert', r.leistungswert ? r.leistungswert + ' m²/Std.' : '–']]
+         ['Lohnkosten (inkl. Nebenkosten)', euro(r.lohnkosten)], ['Selbstkosten (inkl. Gemeinkosten)', euro(r.selbstkosten)], ['Verrechnungssatz', euro(r.verrechnungssatz) + ' / Std.'], ['Leistungswert', r.leistungswert ? r.leistungswert + ' m²/Std.' : '–']].concat(r.bausteineMonat ? [['Preisbausteine (Monatsmittel)', euro(r.bausteineMonat)], ['Gesamt je Monat (Mittel)', euro(r.gesamtMonat)]] : [])
           .map(function (z) { return '<tr><td>' + z[0] + '</td><td style="text-align:right"><b>' + z[1] + '</b></td></tr>'; }).join('') + '</tbody></table>' +
         (k.warnungen.length ? '<div class="hinweis" style="margin-top:.8rem">' + k.warnungen.map(esc).join('<br>') + '</div>' : '') +
         '<div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap"><button class="knopf" id="preisUebernehmen">Als Monatspreis übernehmen</button><a class="knopf zweit" href="/drucken/angebot?objekt=' + o.id + '" target="_blank">Angebot drucken</a></div>' +
@@ -199,7 +200,7 @@
         '<div class="karte"><div class="ueberzeile">Annahmen</div><div class="formular">' + feld('lnk', 'Lohnnebenkosten %', k.annahmen.lohnnebenkosten_prozent, 'number') + feld('gk', 'Gemeinkosten %', k.annahmen.gemeinkosten_prozent, 'number') + feld('gw', 'Gewinn %', k.annahmen.gewinn_prozent, 'number') + '</div>' +
         '<p class="leise klein">Tarif: ' + esc(k.tarif ? k.tarif.lohngruppe + ' · ' + euro(k.tarif.stundenlohn) + ' / Std. · gültig bis ' + (k.tarif.gueltig_bis ? datumDe(k.tarif.gueltig_bis) : 'offen') : 'kein Tarif') + ' · Wegezeit ' + k.annahmen.wegezeit_min + ' Min. je Einsatztag</p><button class="knopf zweit klein" id="neuRechnen">Neu rechnen</button></div></div>' +
         '<div class="abschnitt scroll"><table class="tabelle"><thead><tr><th>Raum</th><th>Leistung</th><th>Turnus</th><th style="text-align:right">× je Monat</th><th style="text-align:right">Min. je Ausführung</th><th style="text-align:right">Min. im Monat</th></tr></thead><tbody>' +
-        k.zeilen.map(function (z) { return '<tr><td>' + esc(z.raum) + '</td><td>' + esc(z.taetigkeit) + '</td><td class="leise klein">' + esc(z.turnus) + '</td><td style="text-align:right">' + z.jeMonat.toLocaleString('de-DE') + '</td><td style="text-align:right">' + z.minuten + (z.minutenGeschaetzt ? ' <span class="marke orange" title="Richtzeit fehlt — in Stammdaten eintragen">?</span>' : '') + '</td><td style="text-align:right"><b>' + z.minutenMonat.toLocaleString('de-DE') + '</b></td></tr>'; }).join('') + '</tbody></table></div><div id="bausteine" class="abschnitt"></div>';
+        k.zeilen.map(function (z) { return '<tr><td>' + esc(z.raum) + '</td><td>' + esc(z.taetigkeit) + '</td><td class="leise klein">' + esc(z.turnus) + '</td><td style="text-align:right">' + z.jeMonat.toLocaleString('de-DE') + '</td><td style="text-align:right">' + String(z.minuten).replace('.', ',') + (z.anzahl > 1 ? ' × ' + String(z.anzahl).replace('.', ',') : '') + (z.minutenGeschaetzt ? ' <span class="marke orange" title="Richtzeit fehlt — in Stammdaten eintragen">?</span>' : '') + '</td><td style="text-align:right"><b>' + z.minutenMonat.toLocaleString('de-DE') + '</b></td></tr>'; }).join('') + '</tbody></table></div><div id="bausteine" class="abschnitt"></div>';
       bausteine(o);
       $('#neuRechnen').onclick = function () { rechnen('&lnk=' + $('[name=lnk]').value + '&gk=' + $('[name=gk]').value + '&gw=' + $('[name=gw]').value); };
       $('#preisUebernehmen').onclick = async function () { await holen('/api/objekt/preis', { id: o.id, monatspreis: r.monatspreis }); o.monatspreis = r.monatspreis; objekteCache = null; meldung('Monatspreis übernommen: ' + euro(r.monatspreis)); };
@@ -535,7 +536,7 @@
         $('#neuTarif').onclick = function () { schublade('<h2>Tarif eintragen</h2><div class="formular" style="margin-top:1rem">' + feld('lohngruppe', 'Lohngruppe', 'LG 1') + feld('bezeichnung', 'Bezeichnung', '') + feld('stundenlohn', 'Stundenlohn €', '', 'number', ' step="0.01"') + feld('gueltig_ab', 'gültig ab', '', 'date') + feld('gueltig_bis', 'gültig bis (optional)', '', 'date') + feld('quelle', 'Quelle', 'Lohntarifvertrag Gebäudereinigerhandwerk') + '</div>' + knoepfe('Eintragen'), function (w) { $('#speichern', w).onclick = async function () { try { await holen('/api/tarif', formDaten(w)); schubladeZu(); meldung('Tarif eingetragen'); laden(); } catch (e) { meldung(e.message); } }; }); };
       } else if (stammReiter === 'einstellungen') {
         const e = await holen('/api/einstellungen');
-        const felder = [['firma_name', 'Firmenname (auf Angeboten)'], ['lohnnebenkosten_prozent', 'Lohnnebenkosten %'], ['gemeinkosten_prozent', 'Gemeinkosten %'], ['gewinn_prozent', 'Gewinn %'], ['wegezeit_min', 'Wegezeit je Einsatztag (Min.)'], ['minijob_grenze_eur', 'Minijob-Grenze € / Monat'],
+        const felder = [['firma_name', 'Firmenname (auf Angeboten)'], ['lohnnebenkosten_prozent', 'Lohnnebenkosten %'], ['gemeinkosten_prozent', 'Gemeinkosten %'], ['gewinn_prozent', 'Gewinn %'], ['wegezeit_min', 'Wegezeit je Einsatztag (Min.)'], ['standard_richtzeit_min', 'Standard-Richtzeit, wenn eine Tätigkeit keine hat (Min.)'], ['minijob_grenze_eur', 'Minijob-Grenze € / Monat'],
           ['zuschlag_nacht_von', 'Nachtzuschlag ab (HH:MM)'], ['zuschlag_nacht_bis', 'Nachtzuschlag bis (HH:MM)'], ['datev_berater_nr', 'DATEV Beraternummer'], ['datev_mandant_nr', 'DATEV Mandantennummer'], ['lohnart_stunden', 'Lohnart Grundlohn (Stunden)'], ['lohnart_nacht', 'Lohnart Nachtzuschlag'], ['lohnart_sonntag', 'Lohnart Sonntagszuschlag'], ['lohnart_feiertag', 'Lohnart Feiertagszuschlag'],
           ['firma_strasse', 'Rechnung: Straße'], ['firma_plz', 'Rechnung: PLZ'], ['firma_ort', 'Rechnung: Ort'], ['firma_email', 'Rechnung: E-Mail'], ['firma_telefon', 'Rechnung: Telefon'], ['steuernummer', 'Steuernummer'], ['ust_id', 'USt-IdNr.'], ['handelsregister', 'Handelsregister (z. B. HRB 1234, AG Kiel)'], ['geschaeftsfuehrung', 'Geschäftsführung'],
           ['bank', 'Bank'], ['iban', 'IBAN'], ['bic', 'BIC'], ['ust_prozent', 'Umsatzsteuer %'], ['zahlungsziel_tage', 'Zahlungsziel (Tage)'], ['rechnung_praefix', 'Präfix Rechnungsnummer'], ['stundensatz_abruf', 'Stundensatz Sonderleistungen € (netto)']];
