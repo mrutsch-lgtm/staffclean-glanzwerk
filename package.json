@@ -6,10 +6,14 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/turnus.test.js test/lv-import.test.js"
+    "test": "node --test --test-concurrency=1 test/turnus.test.js test/lv-import.test.js test/api.test.js"
   },
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "dependencies": {
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4"
   }
 }
