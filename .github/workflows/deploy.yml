@@ -29,7 +29,16 @@ jobs:
           npm ci
           npm test
 
+      # Solange die Server-Secrets fehlen, endet der Lauf hier grün mit Hinweis statt rot beim Hochladen
+      - name: Server-Zugang hinterlegt?
+        id: zugang
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          if [ -z "$HOST" ]; then echo "::warning::Secrets SERVER_HOST, SERVER_USER, SSH_PASSWORD fehlen noch — nichts ausgeliefert."; echo "bereit=nein" >> "$GITHUB_OUTPUT"; else echo "bereit=ja" >> "$GITHUB_OUTPUT"; fi
+
       - name: Dateien hochladen
+        if: steps.zugang.outputs.bereit == 'ja'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -41,6 +50,7 @@ jobs:
           overwrite: true
 
       - name: Node 24, Abhängigkeiten, Dienst starten
+        if: steps.zugang.outputs.bereit == 'ja'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
