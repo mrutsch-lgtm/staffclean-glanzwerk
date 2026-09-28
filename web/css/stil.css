@@ -250,3 +250,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 .aufkleber .etikett b { display: block; margin-top: 2mm; }
 .aufkleber .etikett small { color: #587066; font-size: 8pt; }
 @media print { .druckknopf { display: none !important; } .druck { padding: 0; } body { background: #fff !important; } }
+
+/* Hauptnavigation in einer Zeile (11 Bereiche; Inhalt ist auf 1280 px begrenzt) */
+@media (min-width: 721px) {
+  .kopf .innen { gap: 1.2rem; }
+  .nav { gap: 0; }
+  .nav a { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; }
+}

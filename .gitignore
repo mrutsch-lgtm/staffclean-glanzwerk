@@ -2,3 +2,4 @@ node_modules/
 daten/
 *.log
 test/abnahme-bilder/
+daten-pruefung/
