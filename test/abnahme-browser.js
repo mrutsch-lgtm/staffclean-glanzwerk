@@ -95,9 +95,16 @@ async function buero1(b) {
   // Kalkulation
   await klick(s, '[data-reiter=kalk]', 'Reiter Kalkulation'); await s.fill('[name=gw]', '10'); await klick(s, '#neuRechnen', 'Neu rechnen mit 10 % Gewinn');
   await klick(s, '#preisUebernehmen', 'Monatspreis übernehmen'); await meldungIst(s, /Monatspreis übernommen/, 'Preis übernommen');
+  await s.locator('#neuBaustein').waitFor(); await klick(s, '#neuBaustein', '+ Preisbaustein');
+  await schublade(s, { bezeichnung: 'Glasreinigung', art: 'je_ausfuehrung', turnus: '1 M', preis: '53.50', einheit: 'Durchgang' }); await meldungIst(s, /Baustein gespeichert/, 'Glasreinigung je Durchgang (1 M)');
+  erwartet(); await klick(s, '#neuBaustein', '+ Baustein ohne Turnus'); await schublade(s, { bezeichnung: 'Glas ohne Turnus', art: 'je_ausfuehrung', turnus: '', preis: '10' }); await meldungIst(s, /Turnus/, 'Baustein „je Durchgang" ohne Turnus abgelehnt'); await s.click('#schublade #abbrechen');
+  await klick(s, '#neuBaustein', '+ Winterdienst'); await schublade(s, { bezeichnung: 'Winterdienst Zuwegung', art: 'monatlich', monate: '11,12,1,2,3', preis: '90', einheit: 'Monat' }); await meldungIst(s, /Baustein gespeichert/, 'Winterdienst nur Nov–März');
+  await s.locator('[data-bs]').first().click(); await schublade(s, { preis: '53.50' }); await meldungIst(s, /Baustein gespeichert/, 'Baustein ändern');
   await bild(s, 'b05-objekt-kalkulation');
   const [angebot] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/angebot"]')]); await beobachten(angebot, 'Angebot'); await ruhig(angebot);
-  const atext = await angebot.textContent('body'); if (!/Monatlich brutto/.test(atext) || /Verrechnungssatz|Lohnkosten|Selbstkosten|Gewinn/.test(atext)) throw new Error('Angebot: Preis fehlt oder interne Zahlen sichtbar'); ok('Angebot druckbar, ohne interne Kalkulation'); await bild(angebot, 'b06-angebot'); await angebot.close();
+  await angebot.locator('#weitere h3').waitFor();
+  const atext = await angebot.textContent('body'); if (!/Weitere Leistungen[\s\S]*Glasreinigung[\s\S]*Winterdienst/.test(atext)) throw new Error('Angebot ohne Preisbausteine'); ok('Angebot zeigt Glasreinigung und Winterdienst');
+  if (!/Monatlich brutto/.test(atext) || /Verrechnungssatz|Lohnkosten|Selbstkosten|Gewinn/.test(atext)) throw new Error('Angebot: Preis fehlt oder interne Zahlen sichtbar'); ok('Angebot druckbar, ohne interne Kalkulation'); await bild(angebot, 'b06-angebot'); await angebot.close();
   // Standort + QR
   await klick(s, '[data-reiter=standort]', 'Reiter Standort & QR'); await s.fill('[name=lat]', '54.3233'); await s.fill('[name=lon]', '10.1228'); await klick(s, '#standortSpeichern', 'Standort speichern'); await meldungIst(s, /Standort gespeichert/, 'Standort gesetzt');
   await klick(s, '[data-reiter=standort]', 'Reiter Standort erneut'); const qrOk = await s.locator('img[src^="/api/qr"]').first().evaluate(i => i.complete && i.naturalWidth > 0); if (!qrOk) throw new Error('QR-Bild lädt nicht'); ok('QR-Vorschau lädt');
@@ -211,7 +218,82 @@ async function kunde(b, oid) {
   await klick(s, 'a[href^="#bericht/"]', 'Bericht ansehen'); await bild(s, 'k03-bericht');
   await s.goto(URL0 + '/kunde#objekt/' + oid); await ruhig(s); await klick(s, '#reklamieren', 'Reklamation öffnen'); await s.fill('#rtext', 'Mülleimer nicht geleert (Abnahme)');
   const [w] = await Promise.all([s.waitForEvent('filechooser'), s.click('#rfoto')]); await w.setFiles(pngDatei()); await s.waitForTimeout(300); await klick(s, '#rsenden', 'Reklamation senden'); await meldungIst(s, /Reklamation ist bei uns eingegangen/, 'Reklamation gemeldet');
+  await klick(s, '#anfragen', 'Sonderleistung anfragen'); await s.fill('#atext', 'Grundreinigung Flur nach Umbau (Abnahme)'); await s.fill('#adatum', plus(2));
+  await klick(s, '#asenden', 'Anfrage senden'); await meldungIst(s, /Anfrage ist bei uns eingegangen/, 'Anfrage gesendet');
+  if (!/Grundreinigung Flur[\s\S]*angefragt/.test(await s.textContent('#inhalt'))) throw new Error('Anfrage nicht in „Ihre Anfragen"'); ok('Anfrage steht mit Status „angefragt" im Portal');
+  await klick(s, '#nav a[data-v=rechnungen]', 'Rechnungen (noch leer)'); if (!/Noch keine Rechnungen/.test(await s.textContent('#inhalt'))) throw new Error('Rechnungsliste nicht leer'); ok('noch keine Rechnung sichtbar');
   await klick(s, '#abmelden', 'Kunde abmelden'); await s.waitForURL(/anmelden/); ok('abgemeldet → /anmelden');
+  await ctx.close();
+}
+
+async function abrechnen(b) {
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Abrechnung');
+  await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
+  // Anfrage aus dem Portal bestätigen, einplanen, erledigen
+  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung öffnen'); await klick(s, '[data-reiter=auftraege]', 'Reiter Sonderleistungen');
+  const karte = () => s.locator('.karte', { hasText: 'Grundreinigung Flur' });
+  if (!/vom Kunden/.test(await karte().textContent())) throw new Error('Kundenanfrage fehlt im Büro'); ok('Kundenanfrage im Büro angekommen');
+  await karte().locator('[data-best]').click(); const anna = await s.locator('#schublade [name=mitarbeiter_id] option', { hasText: 'Anna' }).getAttribute('value');
+  await schublade(s, { antwort: 'Gern, wir kommen.', mitarbeiter_id: anna, beginn: '12:00', ende: '14:00' }, '#speichern'); await meldungIst(s, /Bestätigt und im Dienstplan eingeplant/, 'Anfrage bestätigt + als Schicht eingeplant');
+  erwartet(); await karte().locator('[data-erl]').click(); await schublade(s, { stunden: '', festpreis: '' }, '#speichern'); await meldungIst(s, /Stunden oder Festpreis/, 'Erledigt ohne Stunden abgelehnt'); await s.click('#schublade #abbrechen');
+  await karte().locator('[data-erl]').click(); await schublade(s, { stunden: '2' }, '#speichern'); await meldungIst(s, /nächste Rechnung/, 'Sonderleistung erledigt (2 Std.)');
+  await klick(s, '#neuAuftrag', '+ eigene Sonderleistung'); await schublade(s, { text: 'Fensterbänke Keller (Abnahme)', festpreis: '40' }, '#speichern'); await meldungIst(s, /angelegt/, 'Sonderleistung mit Festpreis angelegt');
+  await s.locator('.karte', { hasText: 'Fensterbänke Keller' }).locator('[data-erl]').click(); await schublade(s, {}, '#speichern'); await meldungIst(s, /nächste Rechnung/, 'Festpreis-Leistung erledigt');
+  await bild(s, 'b22-sonderleistungen');
+  // Stundensatz fehlt noch → Hinweis beim Erzeugen; danach eintragen
+  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen'); await s.fill('[name=stundensatz_abruf]', '35'); await klick(s, '#eSpeichern', 'Stundensatz 35 € speichern'); await meldungIst(s, /gespeichert/, 'Stundensatz gespeichert');
+  // Entwürfe für den laufenden Monat
+  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen'); await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erzeugen');
+  await meldungIst(s, /Entwürfe angelegt/, 'Entwürfe erzeugt'); if (await s.locator('#schublade').isVisible()) { ok('Übersprungene Objekte mit Grund angezeigt'); await s.click('#schublade #abbrechen'); }
+  await s.locator('tr[data-re]', { hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
+  let t = await s.textContent('#inhalt');
+  if (!/Unterhaltsreinigung laut Leistungsverzeichnis/.test(t) || !/Glasreinigung/.test(t) || !/Grundreinigung Flur/.test(t) || !/Fensterbänke Keller/.test(t)) throw new Error('Entwurf unvollständig: ' + t.slice(0, 300)); ok('Entwurf: Pauschale + Glas (1 M) + Sonderleistung nach Stunden + Festpreis');
+  if (/Winterdienst/.test(t) !== [11, 12, 1, 2, 3].includes(new Date().getMonth() + 1)) throw new Error('Winterdienst-Saison falsch angewendet'); ok('Winterdienst nur in der Saison');
+  if (!/Pflichtangaben/.test(t)) throw new Error('Pflichtangaben-Warnung fehlt'); ok('Warnung: Pflichtangaben fehlen');
+  await bild(s, 'b23-rechnung-entwurf');
+  await klick(s, '#rePos', '+ Position'); await schublade(s, { bezeichnung: 'Anfahrt Sonderleistung', menge: '1', einheit: 'pauschal', einzelpreis: '15' }, '#speichern'); await meldungIst(s, /Position gespeichert/, 'Position hinzufügen');
+  await s.locator('tr', { hasText: 'Anfahrt Sonderleistung' }).locator('[data-pos]').click(); await schublade(s, { einzelpreis: '12.5' }, '#speichern'); await meldungIst(s, /Position gespeichert/, 'Position ändern');
+  if (!/12,50/.test(await s.textContent('#inhalt'))) throw new Error('Geänderter Preis nicht übernommen'); ok('geänderter Preis sichtbar');
+  await s.locator('tr', { hasText: 'Anfahrt Sonderleistung' }).locator('[data-posweg]').click(); await ruhig(s); await meldungIst(s, /entfernt/, 'Position entfernen');
+  erwartet(); await klick(s, '#reStellen', 'Stellen ohne Pflichtangaben'); await meldungIst(s, /Pflichtangaben fehlen/, 'Stellen ohne Pflichtangaben blockiert');
+  // Pflichtangaben nachtragen: eigene Firma + Kundenanschrift
+  const rurl = s.url();
+  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen');
+  for (const [n, v] of [['firma_strasse', 'Prüfstraße 2'], ['firma_plz', '24534'], ['firma_ort', 'Neumünster'], ['firma_email', 'rechnung@abnahme.test'], ['steuernummer', '00/000/00000'], ['iban', 'DE02 1203 0000 0000 2020 51'], ['bank', 'Abnahmebank'], ['geschaeftsfuehrung', 'Test Geschäftsführung']]) await s.fill('[name=' + n + ']', v);
+  await klick(s, '#eSpeichern', 'Rechnungsangaben speichern'); await meldungIst(s, /gespeichert/, 'Firmenangaben gespeichert');
+  await klick(s, '#nav a[data-v=kunden]', 'Kunden'); await s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' }).locator('[data-kunde]').click();
+  await schublade(s, { anschrift: 'Kundenweg 5', plz: '24103', kundennummer: 'K-1001', leitweg_id: '' }); await meldungIst(s, /Gespeichert/, 'Kundenanschrift + Kundennummer');
+  await s.goto(rurl); await ruhig(s); if (/Pflichtangaben/.test(await s.textContent('#inhalt'))) throw new Error('Pflichtangaben-Warnung bleibt'); ok('Pflichtangaben vollständig');
+  const [vorschau] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/rechnung"]')]); await beobachten(vorschau, 'Vorschau'); await ruhig(vorschau);
+  if (await vorschau.locator('#entwurf').isHidden()) throw new Error('Entwurf ohne ENTWURF-Stempel'); ok('Vorschau trägt „ENTWURF"'); await vorschau.close();
+  await klick(s, '#reStellen', 'Rechnung stellen'); await meldungIst(s, /Gestellt: RE-\d{4}-0001/, 'Rechnung gestellt');
+  if (await s.locator('#rePos').count()) throw new Error('Gestellte Rechnung noch änderbar'); ok('gestellte Rechnung ohne Bearbeiten-Knöpfe');
+  const [druck] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/rechnung"]')]); await beobachten(druck, 'Rechnungsdruck'); await ruhig(druck);
+  const dt = await druck.textContent('body');
+  for (const muss of ['RE-', 'Kundenweg 5', 'Prüfstraße 2', 'Steuernummer: 00/000/00000', 'IBAN: DE02', 'Leistungszeitraum', 'Umsatzsteuer', 'Rechnungsbetrag', 'K-1001']) if (!dt.includes(muss)) throw new Error('Rechnung ohne Pflichtangabe „' + muss + '"');
+  if (/Lohnnebenkosten|Gemeinkosten|Gewinn|Verrechnungssatz/.test(dt)) throw new Error('Interne Kalkulationswerte auf der Rechnung'); ok('Rechnungsdruck: alle Pflichtangaben, keine internen Werte'); await bild(druck, 'b24-rechnung-druck'); await druck.close();
+  const [xml] = await Promise.all([s.waitForEvent('download'), s.click('a[href^="/api/rechnung/xrechnung"]')]); const xp = path.join(DATEN, 'x.xml'); await xml.saveAs(xp); const xt = fs.readFileSync(xp, 'utf8');
+  if (!/xrechnung_3\.0/.test(xt) || !/<cbc:BuyerReference>K-1001</.test(xt) || !/<cbc:PayableAmount currencyID="EUR">\d+\.\d\d</.test(xt)) throw new Error('XRechnung unvollständig'); ok('XRechnung heruntergeladen (' + xml.suggestedFilename() + ')');
+  await klick(s, '#reBezahlt', 'Als bezahlt markieren'); await meldungIst(s, /bezahlt/, 'bezahlt'); await klick(s, '#reOffen', 'Wieder offen'); await meldungIst(s, /Wieder offen/, 'wieder offen');
+  await klick(s, '#reStorno', 'Stornieren'); await meldungIst(s, /Stornorechnung RE-\d{4}-0002/, 'Storno mit eigener Nummer'); await bild(s, 'b25-storno');
+  await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); const lt = await s.textContent('#inhalt');
+  if (!/storniert/.test(lt) || !/Storno/.test(lt)) throw new Error('Liste zeigt Storno nicht'); ok('Liste: Original storniert + Stornorechnung');
+  // Nach dem Storno sind die Sonderleistungen wieder abrechenbar → neuer Entwurf, stellen
+  await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erneut erzeugen'); await meldungIst(s, /Entwürfe angelegt/, 'neuer Entwurf'); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen');
+  await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
+  if (!/Grundreinigung Flur/.test(await s.textContent('#inhalt'))) throw new Error('Sonderleistung nach Storno nicht wieder abrechenbar'); ok('nach Storno: Sonderleistung wieder im Entwurf');
+  await klick(s, '#reStellen', 'Korrigierte Rechnung stellen'); await meldungIst(s, /Gestellt: RE-\d{4}-0003/, 'Rechnung RE-…-0003 gestellt');
+  await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/);
+  // Kunde sieht Rechnungen, kann ansehen und XRechnung laden
+  await s.fill('[name=email]', 'kunde@abnahme.test'); await s.fill('[name=passwort]', 'Kunde-Abnahme-1'); await s.click('#los'); await s.waitForURL(/\/kunde/); await ruhig(s);
+  await klick(s, '#nav a[data-v=rechnungen]', 'Kunde: Rechnungen'); const kt = await s.textContent('#inhalt');
+  if (!/0001/.test(kt) || !/0002/.test(kt) || !/0003/.test(kt)) throw new Error('Kunde sieht nicht alle drei Belege'); ok('Kunde sieht Rechnung, Storno und neue Rechnung'); await bild(s, 'k04-rechnungen');
+  const [kd] = await Promise.all([ctx.waitForEvent('page'), s.locator('tr', { hasText: '0003' }).locator('a[href^="/drucken/rechnung"]').click()]); await beobachten(kd, 'Kunde-Rechnung'); await ruhig(kd);
+  const kdt = await kd.textContent('body'); if (!/Rechnungsbetrag/.test(kdt) || !/Prüfstraße 2/.test(kdt)) throw new Error('Kunde: Rechnung lädt nicht'); ok('Kunde öffnet die Rechnung'); await kd.close();
+  const [kx] = await Promise.all([s.waitForEvent('download'), s.locator('tr', { hasText: '0003' }).locator('a[href^="/api/kunde/xrechnung"]').click()]); ok('Kunde lädt XRechnung: ' + kx.suggestedFilename());
+  const firma = await s.request.get(URL0 + '/api/kunde/firma'); const fj = await firma.json(); if ('gewinn_prozent' in fj || 'lohnnebenkosten_prozent' in fj) throw new Error('Kunde sieht Kalkulationswerte'); ok('Kunde sieht keine Kalkulationswerte');
+  await klick(s, '#nav a[data-v=uebersicht]', 'Meine Objekte'); await s.locator('[data-o]').first().click(); await ruhig(s);
+  if (!/Grundreinigung Flur[\s\S]*erledigt/.test(await s.textContent('#inhalt'))) throw new Error('Anfrage im Portal nicht erledigt'); ok('Portal: Anfrage steht auf „erledigt"');
   await ctx.close();
 }
 
@@ -247,7 +329,7 @@ async function buero2(b) {
   try {
     b = await chromium.launch();
     if (process.env.NUR_APP) { await app(b, true); throw new Error('NUR_APP fertig'); }
-    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b);
+    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b);
     await b.close(); b = null;
     if (mitWebkit) {
       const w = await webkit.launch(); const ctx = await w.newContext({ viewport: { width: 390, height: 844 } }); const s = await ctx.newPage(); await beobachten(s, 'WebKit');
@@ -268,6 +350,6 @@ async function buero2(b) {
   console.log(protokoll.join('\n'));
   console.log('\n' + schritte + ' Schritte geprüft · ' + fehler.length + ' Fehler');
   fehler.forEach(f => console.log('✗ ' + f));
-  try { fs.rmSync(DATEN, { recursive: true, force: true }); } catch (e) {}
+  if (!process.env.BEHALTEN) { try { fs.rmSync(DATEN, { recursive: true, force: true }); } catch (e) {} } else console.log('Daten behalten: ' + DATEN);
   process.exit(fehler.length ? 1 : 0);
 })();

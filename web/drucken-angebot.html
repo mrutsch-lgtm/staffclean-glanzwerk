@@ -18,6 +18,7 @@
   <table class="tabelle" id="lv"></table>
   <h3 style="margin-top:1.5rem">Preis</h3>
   <table class="tabelle" id="preis" style="max-width:460px"></table>
+  <div id="weitere"></div>
   <p class="leise klein" style="margin-top:1rem" id="fuss">Feiertage sind im Turnus berücksichtigt. Leistungen „bei Bedarf" werden nach Aufwand gesondert beauftragt. Dieses Angebot gilt 30 Tage.</p>
 </div>
 <button class="knopf druckknopf" onclick="print()">Drucken</button>
@@ -28,7 +29,7 @@
   const id = new URLSearchParams(location.search).get('objekt');
   const euro = v => (Number(v) || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
   try {
-    const [o, k, e] = await Promise.all([holen('/api/objekt?id=' + encodeURIComponent(id)), holen('/api/kalkulation?objekt=' + encodeURIComponent(id)), holen('/api/einstellungen')]);
+    const [o, k, e, bs] = await Promise.all([holen('/api/objekt?id=' + encodeURIComponent(id)), holen('/api/kalkulation?objekt=' + encodeURIComponent(id)), holen('/api/einstellungen'), holen('/api/preispositionen?objekt=' + encodeURIComponent(id))]);
     document.title = 'Angebot ' + o.name;
     $('#firma').innerHTML = '<b>' + esc(e.firma_name || 'StaffClean GmbH') + '</b><br>' + esc(datumDe(heute()));
     $('#name').textContent = o.name; $('#anschrift').textContent = [o.kunde, o.strasse, [o.plz, o.ort].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
@@ -37,8 +38,10 @@
       const l = o.taetigkeiten.filter(function (t) { return pos[r.id + '|' + t.id]; });
       return l.map(function (t, i) { return '<tr>' + (i === 0 ? '<td rowspan="' + l.length + '"><b>' + esc(r.name) + '</b>' + (r.flaeche_m2 ? '<br><span class="leise klein">' + String(r.flaeche_m2).replace('.', ',') + ' m²</span>' : '') + '</td>' : '') + '<td>' + esc(t.name) + (t.anleitung ? '<br><span class="leise klein">' + esc(t.anleitung) + '</span>' : '') + '</td><td>' + esc(pos[r.id + '|' + t.id].regel) + '</td></tr>'; }).join('');
     }).join('') + '</tbody>';
-    const netto = o.monatspreis || k.ergebnis.monatspreis, ust = Math.round(netto * 19) / 100;
-    $('#preis').innerHTML = '<tbody><tr><td>Monatliche Pauschale (netto)</td><td style="text-align:right">' + euro(netto) + '</td></tr><tr><td>zzgl. 19 % Umsatzsteuer</td><td style="text-align:right">' + euro(ust) + '</td></tr><tr class="summe"><td>Monatlich brutto</td><td style="text-align:right">' + euro(netto + ust) + '</td></tr></tbody>';
+    const satz = Number(e.ust_prozent) || 19, netto = o.monatspreis || k.ergebnis.monatspreis, ust = Math.round(netto * satz) / 100;
+    $('#preis').innerHTML = '<tbody><tr><td>Monatliche Pauschale (netto)</td><td style="text-align:right">' + euro(netto) + '</td></tr><tr><td>zzgl. ' + String(satz).replace('.', ',') + ' % Umsatzsteuer</td><td style="text-align:right">' + euro(ust) + '</td></tr><tr class="summe"><td>Monatlich brutto</td><td style="text-align:right">' + euro(netto + ust) + '</td></tr></tbody>';
+    const weitere = bs.filter(function (b) { return b.aktiv; });
+    if (weitere.length) $('#weitere').innerHTML = '<h3 style="margin-top:1.5rem">Weitere Leistungen</h3><table class="tabelle"><thead><tr><th>Leistung</th><th>Turnus / Zeitraum</th><th style="text-align:right">Preis netto</th></tr></thead><tbody>' + weitere.map(function (b) { return '<tr><td>' + esc(b.bezeichnung) + '</td><td>' + esc(b.art === 'je_ausfuehrung' ? b.turnus : b.art === 'monatlich' ? (b.monate ? 'monatlich in den Monaten ' + b.monate : 'monatlich') : b.art === 'stundensatz' ? 'auf Abruf, nach Aufwand' : 'einmalig') + '</td><td style="text-align:right">' + euro(b.preis) + ' / ' + esc(b.einheit || '') + '</td></tr>'; }).join('') + '</tbody></table>';
   } catch (x) { document.querySelector('.druck').innerHTML = '<div class="hinweis">' + esc(x.message) + '</div>'; }
 })();
 </script>

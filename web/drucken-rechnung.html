@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rechnung · StaffClean</title>
+<link rel="icon" href="/bilder/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/stil.css">
+<style>
+  @page { size: A4; margin: 16mm 16mm 20mm; } body { background: #fff; }
+  .tabelle td, .tabelle th { font-size: .85rem; }
+  .anschriften { display: grid; grid-template-columns: 1.3fr 1fr; gap: 2rem; margin: 1rem 0 2rem; }
+  .absenderzeile { font-size: .7rem; color: #587066; border-bottom: 1px solid #cfdcd5; padding-bottom: .2rem; margin-bottom: .5rem; }
+  .eckdaten td { padding: .1rem .6rem .1rem 0; font-size: .85rem; }
+  .summen td { border: 0; padding: .25rem .6rem; }
+  .summen tr.gesamt td { font-weight: 800; border-top: 2px solid var(--gruen-700); font-size: 1rem; }
+  .fusszeile { margin-top: 2.5rem; border-top: 1px solid #cfdcd5; padding-top: .6rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; font-size: .72rem; color: #587066; }
+  .entwurf { position: fixed; top: 40%; left: 0; right: 0; text-align: center; font-size: 7rem; font-weight: 800; color: rgba(185, 28, 28, .12); transform: rotate(-18deg); pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="druck">
+  <div class="briefkopf"><img src="/bilder/logo-dunkel.webp" alt="StaffClean"><div style="text-align:right" class="klein" id="kopf"></div></div>
+  <div class="anschriften">
+    <div><div class="absenderzeile" id="absender"></div><div id="empfaenger"></div></div>
+    <table class="eckdaten" id="eckdaten"></table>
+  </div>
+  <h1 id="titel" style="color:var(--gruen-900);font-size:1.6rem;margin:0 0 .3rem">Rechnung</h1>
+  <p id="einleitung" class="klein"></p>
+  <table class="tabelle" id="positionen"></table>
+  <table class="summen" id="summen" style="margin-left:auto;margin-top:.6rem"></table>
+  <p id="zahlung" class="klein" style="margin-top:1.4rem"></p>
+  <div class="fusszeile" id="fuss"></div>
+</div>
+<div class="entwurf" id="entwurf" hidden>ENTWURF</div>
+<button class="knopf druckknopf" onclick="print()">Drucken / als PDF speichern</button>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { $, esc, holen, datumDe } = UI;
+  const euro = v => (Number(v) || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+  const id = encodeURIComponent(new URLSearchParams(location.search).get('id'));
+  try {
+    const ich = await UI.ich(); if (!ich) { location.href = '/anmelden'; return; }
+    const kunde = ich.rolle === 'kunde';
+    const r = await holen((kunde ? '/api/kunde/rechnung?id=' : '/api/rechnung?id=') + id);
+    const e = kunde ? await holen('/api/kunde/firma') : await holen('/api/einstellungen');
+    const storno = !!r.storno_von;
+    document.title = (storno ? 'Stornorechnung ' : 'Rechnung ') + (r.nummer || 'Entwurf');
+    $('#entwurf').hidden = r.status !== 'entwurf';
+    const anschrift = [e.firma_name, e.firma_strasse, [e.firma_plz, e.firma_ort].filter(Boolean).join(' ')].filter(Boolean);
+    $('#kopf').innerHTML = anschrift.map(esc).join('<br>') + (e.firma_telefon ? '<br>' + esc(e.firma_telefon) : '') + (e.firma_email ? '<br>' + esc(e.firma_email) : '');
+    $('#absender').textContent = anschrift.join(' · ');
+    $('#empfaenger').innerHTML = [r.kunde, r.ansprechpartner, r.anschrift, [r.plz, r.ort].filter(Boolean).join(' ')].filter(Boolean).map(esc).join('<br>');
+    const eck = [['Rechnungsnummer', r.nummer || '— (Entwurf)'], ['Rechnungsdatum', r.datum ? datumDe(r.datum) : '—'], ['Leistungszeitraum', datumDe(r.zeitraum_von) + ' – ' + datumDe(r.zeitraum_bis)], ['Objekt', r.objekt || ''], ['Kundennummer', r.kundennummer || ''], ['Ihre USt-IdNr.', r.kunde_ust_id || ''], ['Leitweg-ID', r.leitweg_id || '']].filter(function (x) { return x[1]; });
+    $('#eckdaten').innerHTML = eck.map(function (x) { return '<tr><td class="leise">' + esc(x[0]) + '</td><td><b>' + esc(x[1]) + '</b></td></tr>'; }).join('');
+    $('#titel').textContent = storno ? 'Stornorechnung' : 'Rechnung';
+    $('#einleitung').textContent = storno ? 'Hiermit stornieren wir unsere Rechnung ' + (r.storno_nummer || '') + ' vollständig.' : 'Für die im Leistungszeitraum erbrachten Reinigungsleistungen berechnen wir:';
+    $('#positionen').innerHTML = '<thead><tr><th>Pos.</th><th>Leistung</th><th style="text-align:right">Menge</th><th>Einheit</th><th style="text-align:right">Einzelpreis</th><th style="text-align:right">Betrag</th></tr></thead><tbody>' +
+      r.positionen.map(function (p, i) { return '<tr><td>' + (i + 1) + '</td><td>' + esc(p.bezeichnung) + '</td><td style="text-align:right">' + String(p.menge).replace('.', ',') + '</td><td>' + esc(p.einheit || '') + '</td><td style="text-align:right">' + euro(p.einzelpreis) + '</td><td style="text-align:right">' + euro(p.betrag) + '</td></tr>'; }).join('') + '</tbody>';
+    $('#summen').innerHTML = '<tr><td>Summe netto</td><td style="text-align:right">' + euro(r.netto) + '</td></tr><tr><td>zzgl. ' + String(r.ust_prozent).replace('.', ',') + ' % Umsatzsteuer</td><td style="text-align:right">' + euro(r.ust) + '</td></tr><tr class="gesamt"><td>' + (storno ? 'Gutschriftbetrag' : 'Rechnungsbetrag') + '</td><td style="text-align:right">' + euro(r.brutto) + '</td></tr>';
+    $('#zahlung').textContent = storno ? 'Der Betrag wird mit offenen Forderungen verrechnet bzw. erstattet.' : r.faellig ? 'Bitte überweisen Sie den Rechnungsbetrag bis zum ' + datumDe(r.faellig) + ' ohne Abzug' + (e.iban ? ' auf das unten genannte Konto' : '') + ' unter Angabe der Rechnungsnummer ' + r.nummer + '. Vielen Dank für Ihren Auftrag.' : '';
+    $('#fuss').innerHTML = '<div>' + anschrift.map(esc).join('<br>') + '</div><div>' + [e.geschaeftsfuehrung ? 'Geschäftsführung: ' + e.geschaeftsfuehrung : '', e.handelsregister, e.steuernummer ? 'Steuernummer: ' + e.steuernummer : '', e.ust_id ? 'USt-IdNr.: ' + e.ust_id : ''].filter(Boolean).map(esc).join('<br>') + '</div><div>' + [e.bank, e.iban ? 'IBAN: ' + e.iban : '', e.bic ? 'BIC: ' + e.bic : ''].filter(Boolean).map(esc).join('<br>') + '</div>';
+  } catch (x) { document.querySelector('.druck').innerHTML = '<div class="hinweis">' + esc(x.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

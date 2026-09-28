@@ -23,7 +23,7 @@
 
   async function objekt(id) {
     const o = await holen('/api/kunde/objekt?id=' + id);
-    kopf([o.strasse, o.ort].filter(Boolean).join(', '), esc(o.name), 'Leistungsnachweis der letzten 14 Tage, Prüfberichte und Ihre Reklamationen.', '<button class="knopf gold" id="reklamieren">Reklamation melden</button><a class="knopf hell" href="#">Alle Objekte</a>');
+    kopf([o.strasse, o.ort].filter(Boolean).join(', '), esc(o.name), 'Leistungsnachweis der letzten 14 Tage, Prüfberichte und Ihre Reklamationen.', '<button class="knopf gold" id="anfragen">Sonderleistung anfragen</button><button class="knopf hell" id="reklamieren">Reklamation melden</button><a class="knopf hell" href="#">Alle Objekte</a>');
     const fotos = [].concat(...o.tage.map(function (t) { return t.fotos.map(function (f) { return Object.assign({ datum: t.datum }, f); }); })).slice(0, 24);
     inhalt.innerHTML = '<div class="raster k2"><div class="karte"><div class="ueberzeile">Leistungsnachweis</div><h3>Letzte 14 Tage</h3>' +
       (o.tage.length ? '<table class="tabelle" style="margin-top:.6rem"><thead><tr><th>Tag</th><th style="text-align:right">erledigt</th><th></th></tr></thead><tbody>' + o.tage.map(function (t) { const q = Math.round(t.fertig * 100 / t.soll); return '<tr><td>' + esc(tagLang(t.datum)) + '</td><td style="text-align:right"><b>' + t.fertig + '</b> / ' + t.soll + '</td><td style="width:40%"><div class="fortschritt" style="margin:0"><i style="width:' + q + '%"></i></div></td></tr>'; }).join('') + '</tbody></table>' : '<div class="leise">Keine Leistungstage in diesem Zeitraum.</div>') + '</div>' +
@@ -32,6 +32,24 @@
       (fotos.length ? '<div class="abschnitt"><div class="ueberzeile">Fotonachweise</div><div class="fotoraster" style="margin-top:.6rem">' + fotos.map(function (f) { return '<figure><a href="/fotos/' + esc(f.foto) + '" target="_blank"><img src="/fotos/' + esc(f.foto) + '" alt="" loading="lazy"></a><figcaption>' + esc(f.raum) + ' · ' + esc(f.taetigkeit) + '<br>' + esc(datumDe(f.datum)) + ' ' + esc(f.zeit.slice(11, 16)) + '</figcaption></figure>'; }).join('') + '</div></div>' : '');
     $$('[data-abzeichnen]').forEach(function (b) { b.onclick = function () { abzeichnen(Number(b.dataset.abzeichnen), function () { objekt(id); }); }; });
     $('#reklamieren').onclick = function () { reklamation(o); };
+    $('#anfragen').onclick = function () { anfrage(o); };
+    const auftr = (await holen('/api/kunde/auftraege')).filter(function (a) { return a.objekt === o.name; });
+    const ST = { angefragt: ['angefragt', 'gold'], 'bestätigt': ['bestätigt', ''], erledigt: ['erledigt', ''], abgerechnet: ['erledigt', ''], abgelehnt: ['nicht möglich', 'grau'] };
+    const box = document.createElement('div'); box.className = 'abschnitt';
+    box.innerHTML = '<div class="karte"><div class="ueberzeile">Sonderleistungen</div><h3>Ihre Anfragen</h3>' + (auftr.length ? auftr.map(function (a) { const s = ST[a.status] || [a.status, 'grau']; return '<div class="zeile" style="padding:.45rem 0;border-bottom:1px solid var(--linie)"><div>' + esc(a.text) + '<div class="leise klein">' + (a.termin ? 'Termin ' + datumDe(a.termin) : a.wunschdatum ? 'Wunschtermin ' + datumDe(a.wunschdatum) : '') + (a.antwort ? ' · ' + esc(a.antwort) : '') + '</div></div><span class="marke ' + s[1] + '">' + esc(s[0]) + '</span></div>'; }).join('') : '<div class="leise">Brauchen Sie eine Grund-, Glas- oder Sonderreinigung? Einfach anfragen — wir melden uns mit einem Termin.</div>') + '</div>';
+    inhalt.appendChild(box);
+  }
+  function anfrage(o) {
+    const morgen = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    $('#schubladeInhalt').innerHTML = '<h2>Sonderleistung anfragen</h2><p class="leise">' + esc(o.name) + ' — z. B. Grundreinigung, Glasreinigung, Reinigung nach einer Veranstaltung.</p><label class="feld" style="margin-top:1rem">Was dürfen wir für Sie tun?<textarea id="atext" rows="4"></textarea></label><label class="feld" style="margin-top:.8rem">Wunschtermin<input type="date" id="adatum" min="' + morgen + '" value="' + morgen + '"></label>' +
+      '<div style="display:flex;gap:.6rem;margin-top:1.2rem"><button class="knopf" id="asenden">Anfrage senden</button><button class="knopf zweit" id="abbrechen">Abbrechen</button></div>';
+    $('#schublade').hidden = false; $('#atext').focus(); $('#abbrechen').onclick = zu;
+    $('#asenden').onclick = async function () { const text = $('#atext').value.trim(); if (!text) { $('#atext').focus(); return; } try { await holen('/api/kunde/auftrag', { objekt_id: o.id, text: text, wunschdatum: $('#adatum').value }); zu(); meldung('Danke — Ihre Anfrage ist bei uns eingegangen.'); objekt(o.id); } catch (e) { meldung(e.message); } };
+  }
+  async function rechnungen() {
+    const l = await holen('/api/kunde/rechnungen');
+    kopf('Kundenportal', 'Ihre <span class="akzent">Rechnungen</span>', 'Alle gestellten Rechnungen zum Ansehen, Drucken und als XRechnung.');
+    inhalt.innerHTML = l.length ? '<div class="scroll"><table class="tabelle"><thead><tr><th>Nummer</th><th>Objekt</th><th>Zeitraum</th><th style="text-align:right">Betrag</th><th>Fällig</th><th></th></tr></thead><tbody>' + l.map(function (r) { return '<tr><td><b>' + esc(r.nummer) + '</b>' + (r.storno_von ? ' <span class="marke rot">Storno</span>' : '') + (r.status === 'bezahlt' ? ' <span class="marke">bezahlt</span>' : '') + (r.status === 'storniert' ? ' <span class="marke grau">storniert</span>' : '') + '</td><td>' + esc(r.objekt || '') + '</td><td>' + datumDe(r.zeitraum_von) + ' – ' + datumDe(r.zeitraum_bis) + '</td><td style="text-align:right">' + (Number(r.brutto) || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }) + '</td><td>' + (r.faellig ? datumDe(r.faellig) : '') + '</td><td style="white-space:nowrap"><a class="knopf zweit klein" href="/drucken/rechnung?id=' + r.id + '" target="_blank">Ansehen</a> <a class="knopf zweit klein" href="/api/kunde/xrechnung?id=' + r.id + '">XRechnung</a></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="karte leer">Noch keine Rechnungen.</div>';
   }
   async function abzeichnen(pid, danach) {
     if (!confirm('Prüfbericht abzeichnen? Damit bestätigen Sie, dass Sie ihn zur Kenntnis genommen haben.')) return;
@@ -69,7 +87,8 @@
   $('#abmelden').onclick = async function () { await holen('/api/abmelden', {}); location.href = '/anmelden'; };
   async function route() {
     const [v, arg] = (location.hash.slice(1) || '').split('/'); zu();
-    try { if (v === 'objekt') await objekt(arg); else if (v === 'bericht') await bericht(arg); else await uebersicht(); }
+    $$('#nav a').forEach(function (a) { a.classList.toggle('aktiv', a.dataset.v === (v === 'rechnungen' ? 'rechnungen' : 'uebersicht')); });
+    try { if (v === 'objekt') await objekt(arg); else if (v === 'bericht') await bericht(arg); else if (v === 'rechnungen') await rechnungen(); else await uebersicht(); }
     catch (e) { inhalt.innerHTML = '<div class="karte hinweis">' + esc(e.message) + '</div>'; }
     window.scrollTo(0, 0);
   }

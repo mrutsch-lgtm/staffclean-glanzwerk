@@ -17,6 +17,7 @@ const QUAL = require('./lib/qualitaet');
 const EINS = require('./lib/einsatz');
 const GEO = require('./lib/geo');
 const DP = require('./lib/dienstplan');
+const AB = require('./lib/abrechnung');
 
 const PORT = Number(process.env.STAFFCLEAN_PORT || 8790);
 const HOST = process.env.STAFFCLEAN_HOST || '127.0.0.1';
@@ -215,6 +216,20 @@ async function kundeApi(req, res, p, q, ich) {
     const foto = fotoSpeichern(b.foto, 'k' + o.id);
     db.prepare('INSERT INTO mangel (objekt_id, text, foto, quelle, gemeldet_von, frist) VALUES (?,?,?,?,?,?)').run(o.id, String(b.text).trim(), foto, 'kunde', ich.name, new Date(Date.now() + 86400000).toISOString().slice(0, 10));
     return json(res, 200, { ok: true });
+  }
+  if (p === '/api/kunde/firma') { const e = DB.einstellungen(db); const o = {}; ['firma_name', 'firma_strasse', 'firma_plz', 'firma_ort', 'firma_email', 'firma_telefon', 'steuernummer', 'ust_id', 'bank', 'iban', 'bic', 'handelsregister', 'geschaeftsfuehrung'].forEach(function (k) { o[k] = e[k] || ''; }); return json(res, 200, o); }   // nur, was auf jeder Rechnung steht — keine Kalkulationswerte
+  if (p === '/api/kunde/auftraege') return json(res, 200, db.prepare("SELECT a.id, a.text, a.wunschdatum, a.termin, a.status, a.antwort, a.angelegt_am, a.erledigt_am, o.name objekt FROM auftrag a JOIN objekt o ON o.id = a.objekt_id WHERE o.kunde_id = ? ORDER BY a.id DESC LIMIT 50").all(kid));
+  if (p === '/api/kunde/auftrag' && req.method === 'POST') {
+    const b = await leib(req); const o = meins(b.objekt_id);
+    if (!String(b.text || '').trim()) throw new Fehler(400, 'Bitte beschreiben Sie kurz, welche Leistung Sie brauchen.');
+    if (b.wunschdatum && (!/^\d{4}-\d{2}-\d{2}$/.test(b.wunschdatum) || b.wunschdatum < heute())) throw new Fehler(400, 'Bitte ein Wunschdatum ab heute wählen.');
+    return json(res, 200, { ok: true, id: Number(db.prepare("INSERT INTO auftrag (objekt_id, text, wunschdatum, quelle, angefragt_von) VALUES (?,?,?,'kunde',?)").run(o.id, String(b.text).trim(), b.wunschdatum || null, ich.name).lastInsertRowid) });
+  }
+  if (p === '/api/kunde/rechnungen') return json(res, 200, db.prepare("SELECT r.id, r.nummer, r.status, r.datum, r.faellig, r.zeitraum_von, r.zeitraum_bis, r.brutto, r.storno_von, o.name objekt FROM rechnung r LEFT JOIN objekt o ON o.id = r.objekt_id WHERE r.kunde_id = ? AND r.status <> 'entwurf' ORDER BY r.nummer DESC").all(kid));
+  if (p === '/api/kunde/rechnung') { const r = AB.voll(db, q.get('id')); if (!r || r.kunde_id !== kid || r.status === 'entwurf') throw new Fehler(404, 'Rechnung nicht gefunden.'); return json(res, 200, r); }
+  if (p === '/api/kunde/xrechnung') {
+    const r = AB.voll(db, q.get('id')); if (!r || r.kunde_id !== kid || r.status === 'entwurf') throw new Fehler(404, 'Rechnung nicht gefunden.');
+    res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + r.nummer + '.xml"' }); return res.end(AB.xrechnung(db, r.id));
   }
   if (p === '/api/kunde/abzeichnen' && req.method === 'POST') {
     const b = await leib(req); const pr = pruefungVoll(b.id); if (!pr || pr.kunde_id !== kid) throw new Fehler(404, 'Prüfbericht nicht gefunden.');
@@ -417,13 +432,81 @@ async function bueroApi(req, res, p, q, ich) {
     if (q.get('pruefen') === '1') return json(res, 200, { fehlendePersonalnummer: d.fehlendePersonalnummer, nurPlan: d.nurPlan, zeilen: d.datei.split(/\r?\n/).length - 1 });
     res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="DATEV_Bewegungsdaten_' + monat + '.csv"' }); return res.end(d.datei);
   }
+  // --- Abrechnung: Preisbausteine, Abruf-Aufträge, Rechnungen
+  if (p === '/api/preispositionen') return json(res, 200, db.prepare('SELECT * FROM preisposition WHERE objekt_id = ? ORDER BY id').all(Number(q.get('objekt'))));
+  if (p === '/api/preisposition' && req.method === 'POST') {
+    const b = await leib(req);
+    if (b.id && b.loeschen) { db.prepare('DELETE FROM preisposition WHERE id = ?').run(Number(b.id)); return json(res, 200, { ok: true }); }
+    if (!b.objekt_id || !String(b.bezeichnung || '').trim() || zahl(b.preis) == null) throw new Fehler(400, 'Objekt, Bezeichnung und Preis nötig');
+    const art = ['je_ausfuehrung', 'monatlich', 'einmalig', 'stundensatz'].indexOf(b.art) >= 0 ? b.art : 'je_ausfuehrung';
+    const monate = String(b.monate || '').split(/[^0-9]+/).filter(Boolean).map(Number);
+    if (monate.some(function (m) { return m < 1 || m > 12; })) throw new Fehler(400, 'Saison-Monate als Zahlen 1–12, z. B. 11,12,1,2,3');
+    if (art === 'je_ausfuehrung') { const rg = T.lesen(String(b.turnus || '')); if (!b.turnus || rg.art === 'unbekannt') throw new Fehler(400, 'Für „je Durchgang" bitte einen Turnus angeben (z. B. 1 Q, 1 M, 2 J)'); }
+    const f = [String(b.bezeichnung).trim(), art, art === 'je_ausfuehrung' ? String(b.turnus).trim() : null, zahl(b.preis), b.einheit || ({ monatlich: 'Monat', stundensatz: 'Std.', einmalig: 'pauschal' }[art] || 'Durchgang'), b.aktiv === false ? 0 : 1, art === 'monatlich' && monate.length ? monate.join(',') : null];
+    if (b.id) { db.prepare('UPDATE preisposition SET bezeichnung=?, art=?, turnus=?, preis=?, einheit=?, aktiv=?, monate=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO preisposition (bezeichnung, art, turnus, preis, einheit, aktiv, monate, objekt_id) VALUES (?,?,?,?,?,?,?,?)').run(...f, Number(b.objekt_id)).lastInsertRowid) });
+  }
+  if (p === '/api/auftraege') return json(res, 200, db.prepare(`SELECT a.*, o.name objekt, k.name kunde, r.nummer rechnung FROM auftrag a JOIN objekt o ON o.id = a.objekt_id LEFT JOIN kunde k ON k.id = o.kunde_id LEFT JOIN rechnung r ON r.id = a.rechnung_id
+      ${q.get('status') ? 'WHERE a.status = ?' : ''} ORDER BY CASE a.status WHEN 'angefragt' THEN 0 WHEN 'bestätigt' THEN 1 WHEN 'erledigt' THEN 2 ELSE 3 END, a.id DESC LIMIT 300`).all(...(q.get('status') ? [q.get('status')] : [])));
+  if (p === '/api/auftrag' && req.method === 'POST') {
+    const b = await leib(req);
+    if (!b.id) {
+      if (!b.objekt_id || !String(b.text || '').trim()) throw new Fehler(400, 'Objekt und Beschreibung nötig');
+      return json(res, 200, { ok: true, id: Number(db.prepare("INSERT INTO auftrag (objekt_id, text, wunschdatum, termin, festpreis, quelle, angefragt_von, status) VALUES (?,?,?,?,?,'buero',?,'bestätigt')").run(Number(b.objekt_id), String(b.text).trim(), b.wunschdatum || null, b.wunschdatum || null, zahl(b.festpreis), ich.name).lastInsertRowid) });
+    }
+    const a = db.prepare('SELECT * FROM auftrag WHERE id = ?').get(Number(b.id)); if (!a) throw new Fehler(404, 'Auftrag nicht gefunden');
+    if (a.status === 'abgerechnet') throw new Fehler(409, 'Der Auftrag ist schon abgerechnet — Änderung nur per Storno der Rechnung.');
+    if (b.status === 'bestätigt') {
+      const termin = b.termin || a.termin || a.wunschdatum || null;
+      if (termin && !/^\d{4}-\d{2}-\d{2}$/.test(termin)) throw new Fehler(400, 'Termin im Format JJJJ-MM-TT');
+      let schicht = null;
+      if (b.mitarbeiter_id && b.beginn && b.ende) {
+        if (!termin) throw new Fehler(400, 'Zum Einplanen bitte einen Termin angeben.');
+        try { schicht = DP.speichern(db, { mitarbeiter_id: b.mitarbeiter_id, objekt_id: a.objekt_id, datum: termin, beginn: b.beginn, ende: b.ende, notiz: 'Sonderleistung: ' + a.text })[0]; } catch (e) { throw new Fehler(400, e.message); }
+      }
+      db.prepare("UPDATE auftrag SET status = 'bestätigt', termin = ?, festpreis = ?, antwort = ? WHERE id = ?").run(termin, b.festpreis != null && b.festpreis !== '' ? zahl(b.festpreis) : a.festpreis, b.antwort || null, a.id);
+      return json(res, 200, { ok: true, schicht: schicht });
+    }
+    if (b.status === 'erledigt') {
+      const st = zahl(b.stunden), fp = b.festpreis != null && b.festpreis !== '' ? zahl(b.festpreis) : a.festpreis;
+      if (st == null && fp == null) throw new Fehler(400, 'Bitte Stunden oder Festpreis angeben — sonst lässt sich nichts abrechnen.');
+      if (b.datum && b.datum > heute()) throw new Fehler(400, '„Erledigt am" liegt in der Zukunft.');
+      db.prepare("UPDATE auftrag SET status = 'erledigt', stunden = ?, festpreis = ?, erledigt_am = ? WHERE id = ?").run(st, fp, /^\d{4}-\d{2}-\d{2}$/.test(b.datum || '') ? b.datum : heute(), a.id); return json(res, 200, { ok: true });
+    }
+    if (b.status === 'abgelehnt') { db.prepare("UPDATE auftrag SET status = 'abgelehnt', antwort = ? WHERE id = ?").run(b.antwort || null, a.id); return json(res, 200, { ok: true }); }
+    throw new Fehler(400, 'Unbekannter Status');
+  }
+  if (p === '/api/rechnungen') return json(res, 200, db.prepare(`SELECT r.id, r.nummer, r.status, r.datum, r.faellig, r.zeitraum_von, r.zeitraum_bis, r.netto, r.brutto, r.bezahlt_am, r.storno_von, k.name kunde, o.name objekt
+      FROM rechnung r JOIN kunde k ON k.id = r.kunde_id LEFT JOIN objekt o ON o.id = r.objekt_id ${q.get('status') ? 'WHERE r.status = ?' : ''} ORDER BY r.nummer IS NOT NULL, r.nummer DESC, r.id DESC LIMIT 500`).all(...(q.get('status') ? [q.get('status')] : [])));
+  if (p === '/api/rechnung' && req.method === 'GET') { const r = AB.voll(db, q.get('id')); if (!r) throw new Fehler(404, 'Rechnung nicht gefunden'); r.luecken = r.status === 'entwurf' ? AB.pflichtLuecken(db, r) : []; return json(res, 200, r); }
+  if (p === '/api/rechnung/vorschlag') { try { const v = AB.vorschlag(db, q.get('objekt'), q.get('monat')); return json(res, 200, { von: v.von, bis: v.bis, positionen: v.positionen, hinweise: v.hinweise }); } catch (e) { throw new Fehler(400, e.message); } }
+  if (p === '/api/rechnung/xrechnung') {
+    let xml; try { xml = AB.xrechnung(db, q.get('id')); } catch (e) { throw new Fehler(400, e.message); }
+    res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + AB.voll(db, q.get('id')).nummer + '.xml"' }); return res.end(xml);
+  }
+  if (p.startsWith('/api/rechnung/') && req.method === 'POST') {
+    const b = await leib(req);
+    try {
+      if (p === '/api/rechnung/entwurf') return json(res, 200, Object.assign({ ok: true }, AB.entwurf(db, b.objekt_id, b.monat)));
+      if (p === '/api/rechnung/entwuerfe') {
+        const aus = { angelegt: [], uebersprungen: [] };
+        db.prepare("SELECT id, name FROM objekt WHERE status = 'aktiv' AND kunde_id IS NOT NULL ORDER BY name").all().forEach(function (o) { try { aus.angelegt.push({ objekt: o.name, id: AB.entwurf(db, o.id, b.monat).id }); } catch (e) { aus.uebersprungen.push({ objekt: o.name, grund: e.message }); } });
+        return json(res, 200, Object.assign({ ok: true }, aus));
+      }
+      if (p === '/api/rechnung/position') { AB.position(db, b); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/stellen') return json(res, 200, { ok: true, nummer: AB.stellen(db, b.id) });
+      if (p === '/api/rechnung/stornieren') return json(res, 200, { ok: true, nummer: AB.stornieren(db, b.id) });
+      if (p === '/api/rechnung/bezahlt') { AB.bezahlt(db, b.id, b.datum, b.zurueck); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/loeschen') { AB.loeschen(db, b.id); return json(res, 200, { ok: true }); }
+    } catch (e) { if (e instanceof Fehler) throw e; throw new Fehler(400, e.message); }
+  }
   // --- Stammdaten: Kunden, Konten, Tarife, Einstellungen
   if (p === '/api/kunden' && req.method === 'GET') return json(res, 200, db.prepare('SELECT k.*, (SELECT COUNT(*) FROM objekt o WHERE o.kunde_id = k.id) objekte, (SELECT COUNT(*) FROM benutzer b WHERE b.kunde_id = k.id) zugaenge FROM kunde k ORDER BY k.name').all());
   if (p === '/api/kunde' && req.method === 'POST') {
     const b = await leib(req); if (!String(b.name || '').trim()) throw new Fehler(400, 'Name fehlt');
-    const f = [b.name, b.ansprechpartner || null, b.email || null, b.telefon || null, b.anschrift || null, b.plz || null, b.ort || null];
-    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort) VALUES (?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+    const f = [b.name, b.ansprechpartner || null, b.email || null, b.telefon || null, b.anschrift || null, b.plz || null, b.ort || null, b.kundennummer || null, b.leitweg_id || null, b.ust_id || null];
+    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id) VALUES (?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
   }
   if (p === '/api/konten' && req.method === 'GET') return json(res, 200, db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id ORDER BY b.rolle, b.name').all());
   if (p === '/api/konto' && req.method === 'POST') {
@@ -454,7 +537,7 @@ function fotoErlaubt(ich, datei) {
   return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id);
 }
 
-const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
+const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/drucken/rechnung': 'drucken-rechnung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
 
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://x'); const p = u.pathname, q = u.searchParams;
