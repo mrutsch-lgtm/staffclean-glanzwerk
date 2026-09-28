@@ -20,6 +20,10 @@ const DP = require('./lib/dienstplan');
 const AB = require('./lib/abrechnung');
 const KAT = require('./lib/katalog');
 const PDFR = require('./lib/pdf/rechnung');
+const BRIEF = require('./lib/pdf/brief');
+const MW = require('./lib/mahnwesen');
+const PERS = require('./lib/personal');
+const OA = require('./lib/objektakte');
 
 const PORT = Number(process.env.STAFFCLEAN_PORT || 8790);
 const HOST = process.env.STAFFCLEAN_HOST || '127.0.0.1';
@@ -27,9 +31,14 @@ const SICHER = process.env.STAFFCLEAN_HTTPS === '1';
 const WEB = path.join(__dirname, 'web');
 const FOTOS = path.join(DB.ORDNER, 'fotos');
 fs.mkdirSync(FOTOS, { recursive: true });
+const PERSONAL = path.join(DB.ORDNER, 'personal');   // Dokumente der Personalakten — nur über die Büro-Schnittstelle erreichbar
+fs.mkdirSync(PERSONAL, { recursive: true });
+const plusTageIso = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
 const db = DB.oeffnen();
 Z.tabellen(db);
+const KOMM = require('./lib/kommunikation');
+KOMM.tabellen(db);
 if (process.env.STAFFCLEAN_DEMO !== '0' && DEMO.anlegen(db)) console.log('Beispieldaten angelegt.');
 
 const heute = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -274,6 +283,33 @@ async function kundeApi(req, res, p, q, ich) {
   throw new Fehler(404, 'unbekannter Pfad');
 }
 
+// ---------------------------------------------------------------- Kommunikation und Planner (Büro und Mitarbeiter-App)
+async function kommApi(req, res, p, q, ich) {
+  const nurBuero = () => { if (ich.rolle !== 'buero') throw new Fehler(403, 'Nur im Büro.'); };
+  const b = req.method === 'POST' ? await leib(req) : null;
+  try {
+    if (p === '/api/komm/uebersicht') return json(res, 200, KOMM.uebersicht(db, ich));
+    if (p === '/api/komm/nachrichten') return json(res, 200, KOMM.nachrichten(db, ich, q.get('kanal'), q.get('seit')));
+    if (p === '/api/komm/nachricht' && b) return json(res, 200, Object.assign({ ok: true }, KOMM.senden(db, ich, b, fotoSpeichern)));
+    if (p === '/api/komm/als-mangel' && b) { nurBuero(); return json(res, 200, { ok: true, mangel_id: KOMM.alsMangel(db, ich, b.nachricht_id, b.objekt_id) }); }
+    if (p === '/api/komm/objekte') return json(res, 200, ich.rolle === 'buero' ? db.prepare("SELECT id, name FROM objekt WHERE status = 'aktiv' ORDER BY name").all()
+      : db.prepare("SELECT DISTINCT o.id, o.name FROM objekt o WHERE o.status = 'aktiv' AND (o.id IN (SELECT objekt_id FROM einsatz WHERE mitarbeiter_id = ?) OR o.id IN (SELECT objekt_id FROM schicht WHERE mitarbeiter_id = ? AND datum >= date('now','localtime','-30 day'))) ORDER BY o.name").all(ich.mitarbeiter.id, ich.mitarbeiter.id));
+    if (p === '/api/planner/meine') return json(res, 200, KOMM.meine(db, ich));
+    if (p === '/api/planner/aufgabe' && !b) return json(res, 200, KOMM.aufgabe(db, ich, q.get('id')));
+    if (p === '/api/planner/erledigt' && b) { KOMM.erledigen(db, ich, b.id, !!b.erledigt); return json(res, 200, { ok: true }); }
+    if (p === '/api/planner/punkt' && b) { KOMM.punkt(db, ich, b); return json(res, 200, { ok: true }); }
+    if (p === '/api/planner/kommentar' && b) { KOMM.kommentar(db, ich, b); return json(res, 200, { ok: true }); }
+    nurBuero();
+    if (p === '/api/planner/boards') return json(res, 200, KOMM.boards(db, ich));
+    if (p === '/api/planner/board' && !b) return json(res, 200, KOMM.board(db, q.get('id')));
+    if (p === '/api/planner/board' && b) return json(res, 200, { ok: true, id: KOMM.boardSpeichern(db, b) });
+    if (p === '/api/planner/spalte' && b) { KOMM.spalteSpeichern(db, b); return json(res, 200, { ok: true }); }
+    if (p === '/api/planner/aufgabe' && b) return json(res, 200, { ok: true, id: KOMM.aufgabeSpeichern(db, ich, b) });
+    if (p === '/api/planner/verschieben' && b) { KOMM.verschieben(db, b.id, b.spalte_id, b.index); return json(res, 200, { ok: true }); }
+  } catch (e) { if (e instanceof Fehler) throw e; throw new Fehler(400, e.message); }
+  throw new Fehler(404, 'Unbekannt');
+}
+
 // ---------------------------------------------------------------- Büro
 async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/uebersicht') {
@@ -292,9 +328,34 @@ async function bueroApi(req, res, p, q, ich) {
     if (!String(b.name || '').trim()) throw new Fehler(400, 'Name fehlt');
     const art = ['pauschale', 'stunden', 'beides'].indexOf(b.abrechnungsart) >= 0 ? b.abrechnungsart : 'pauschale';
     if (art !== 'pauschale' && !zahl(b.stundensatz)) throw new Fehler(400, 'Für die Abrechnung nach Stunden bitte einen Stundensatz angeben.');
+    let akte; try { akte = OA.lesen(b); } catch (e) { throw new Fehler(400, e.message); }
     const f = [b.name, b.kunde_id ? Number(b.kunde_id) : null, b.strasse || null, b.plz || null, b.ort || null, b.bundesland || 'SH', Number.isInteger(b.reinigungstag) ? b.reinigungstag : 1, b.zugang || null, b.notiz || null, zahl(b.radius_m) || 150, art, zahl(b.stundensatz)];
-    if (b.id) { db.prepare('UPDATE objekt SET name=?, kunde_id=?, strasse=?, plz=?, ort=?, bundesland=?, reinigungstag=?, zugang=?, notiz=?, radius_m=?, abrechnungsart=?, stundensatz=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO objekt (name, kunde_id, strasse, plz, ort, bundesland, reinigungstag, zugang, notiz, radius_m, abrechnungsart, stundensatz) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+    let id = Number(b.id);
+    if (id) db.prepare('UPDATE objekt SET name=?, kunde_id=?, strasse=?, plz=?, ort=?, bundesland=?, reinigungstag=?, zugang=?, notiz=?, radius_m=?, abrechnungsart=?, stundensatz=? WHERE id=?').run(...f, id);
+    else id = Number(db.prepare('INSERT INTO objekt (name, kunde_id, strasse, plz, ort, bundesland, reinigungstag, zugang, notiz, radius_m, abrechnungsart, stundensatz) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid);
+    const sp = Object.keys(akte); if (sp.length) db.prepare('UPDATE objekt SET ' + sp.map(function (s) { return s + ' = ?'; }).join(', ') + ' WHERE id = ?').run(...sp.map(function (s) { return akte[s]; }), id);
+    return json(res, 200, { ok: true, id: id });
+  }
+  // Objektkopf wie in der Sicherheitsplanung: die wichtigsten Zahlen auf einen Blick
+  if (p === '/api/objekt/kennzahlen') {
+    const o = db.prepare('SELECT * FROM objekt WHERE id = ?').get(Number(q.get('id'))); if (!o) throw new Fehler(404, 'Objekt nicht gefunden');
+    const monat = heute().slice(0, 7), jahr = heute().slice(0, 4);
+    const ist = (von, bis) => Math.round(db.prepare("SELECT kommen, gehen, pause_min FROM zeitbuchung WHERE objekt_id = ? AND gehen IS NOT NULL AND substr(kommen,1,10) BETWEEN ? AND ?").all(o.id, von, bis)
+      .reduce(function (a, z) { return a + Math.max(0, (new Date(z.gehen.replace(' ', 'T')) - new Date(z.kommen.replace(' ', 'T'))) / 60000 - (z.pause_min || 0)); }, 0) / 60 * 100) / 100;
+    let kalk = null; try { kalk = KALK.objekt(db, o.id); } catch (e) { kalk = null; }
+    const rech = db.prepare("SELECT id, nummer, status, datum, faellig, zeitraum_von, zeitraum_bis, netto, brutto, storno_von FROM rechnung r WHERE r.objekt_id = ? OR EXISTS (SELECT 1 FROM rechnung_position p WHERE p.rechnung_id = r.id AND p.objekt_id = ?) ORDER BY r.id DESC LIMIT 24").all(o.id, o.id);
+    const umsatzJahr = AB.r2(db.prepare("SELECT COALESCE(SUM(p.betrag),0) s FROM rechnung_position p JOIN rechnung r ON r.id = p.rechnung_id WHERE r.status IN ('gestellt','bezahlt','storniert') AND r.nummer IS NOT NULL AND substr(r.datum,1,4) = ? AND (p.objekt_id = ? OR (p.objekt_id IS NULL AND r.objekt_id = ?))").get(jahr, o.id, o.id).s);
+    const leitung = o.objektleitung_id ? db.prepare('SELECT id, name, telefon FROM mitarbeiter WHERE id = ?').get(o.objektleitung_id) : null;
+    const pr = db.prepare('SELECT datum, ergebnis FROM pruefung WHERE objekt_id = ? AND ergebnis IS NOT NULL ORDER BY datum DESC LIMIT 1').get(o.id);
+    return json(res, 200, {
+      flaeche: AB.r2(db.prepare('SELECT COALESCE(SUM(flaeche_m2 * COALESCE(anzahl,1)),0) s FROM raum WHERE objekt_id = ?').get(o.id).s), raeume: db.prepare('SELECT COUNT(*) n FROM raum WHERE objekt_id = ?').get(o.id).n,
+      leistungen: db.prepare('SELECT COUNT(*) n FROM lv_position WHERE objekt_id = ?').get(o.id).n, team: db.prepare('SELECT COUNT(*) n FROM einsatz WHERE objekt_id = ?').get(o.id).n,
+      maengel: db.prepare("SELECT COUNT(*) n FROM mangel WHERE objekt_id = ? AND status = 'offen'").get(o.id).n, pruefung: pr || null,
+      sollStundenMonat: kalk && kalk.ergebnis ? kalk.ergebnis.stundenMonat : null, istStundenMonat: ist(monat + '-01', heute()),
+      istStundenVormonat: (function () { const d = new Date(monat + '-15T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); const m = d.toISOString().slice(0, 7); const g = AB.monatsgrenzen(m); return ist(g.von, g.bis); })(),
+      umsatzJahr: umsatzJahr, offen: AB.r2(rech.filter(function (r) { return r.status === 'gestellt' && !r.storno_von; }).reduce(function (a, r) { return a + AB.offenBetrag(db, r); }, 0)),
+      rechnungen: rech, objektleitung: leitung, heuteAufgaben: (function () { try { const t = PLAN.tag(db, heute(), { objekt: o.id }); return { soll: t.soll, fertig: t.fertig }; } catch (e) { return null; } })()
+    });
   }
   if (p === '/api/objekt/status' && req.method === 'POST') { const b = await leib(req); db.prepare('UPDATE objekt SET status = ? WHERE id = ?').run(b.status === 'ruht' ? 'ruht' : 'aktiv', Number(b.id)); return json(res, 200, { ok: true }); }
   if (p === '/api/objekt/standort' && req.method === 'POST') {
@@ -346,7 +407,10 @@ async function bueroApi(req, res, p, q, ich) {
   }
   if (p === '/api/tag') return json(res, 200, PLAN.tag(db, q.get('datum') || heute(), { objekt: q.get('objekt'), mitarbeiter: q.get('mitarbeiter') }));
   if (p === '/api/woche') { const w = PLAN.woche(db, q.get('objekt'), q.get('montag')); if (!w) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, w); }
-  if (p === '/api/mitarbeiter' && req.method === 'GET') return json(res, 200, db.prepare("SELECT id, name, telefon, sprache, rolle, minijob, lohngruppe, stundenlohn, aktiv, personalnummer, wochenstunden, (pin IS NOT NULL AND pin <> '') hat_pin FROM mitarbeiter ORDER BY aktiv DESC, name").all());
+  if (p === '/api/mitarbeiter' && req.method === 'GET') return json(res, 200, db.prepare("SELECT * FROM mitarbeiter ORDER BY aktiv DESC, name").all().map(function (m) {
+    return { id: m.id, name: m.name, telefon: m.telefon, sprache: m.sprache, rolle: m.rolle, minijob: m.minijob, lohngruppe: m.lohngruppe, stundenlohn: m.stundenlohn, aktiv: m.aktiv, personalnummer: m.personalnummer, wochenstunden: m.wochenstunden, hat_pin: !!m.pin,
+      beschaeftigungsart: m.beschaeftigungsart, taetigkeit: m.taetigkeit, eintritt: m.eintritt, austritt: m.austritt, aufenthalt_bis: m.aufenthalt_bis, befristet_bis: m.befristet_bis, luecken: PERS.luecken(m).length };
+  }));
   if (p === '/api/mitarbeiter' && req.method === 'POST') {
     const b = await leib(req); if (!String(b.name || '').trim()) throw new Fehler(400, 'Name fehlt');
     if (b.pin != null && b.pin !== '' && !/^\d{4,8}$/.test(String(b.pin))) throw new Fehler(400, 'Die PIN hat 4 bis 8 Ziffern.');
@@ -357,6 +421,58 @@ async function bueroApi(req, res, p, q, ich) {
     if (b.pin) db.prepare('UPDATE mitarbeiter SET pin = ? WHERE id = ?').run(Z.hash(String(b.pin)), id);
     if (b.aktiv === false || b.aktiv === 0) db.prepare("DELETE FROM sitzung WHERE mitarbeiter_id = ?").run(id);
     return json(res, 200, { ok: true, id: id });
+  }
+  // --- Personalakte (wie in der Sicherheitsplanung)
+  if (p === '/api/personal' && req.method === 'GET') {
+    const m = db.prepare('SELECT * FROM mitarbeiter WHERE id = ?').get(Number(q.get('id'))); if (!m) throw new Fehler(404, 'Mitarbeiter nicht gefunden');
+    m.hat_pin = !!m.pin; delete m.pin;
+    const jahr = Number(q.get('jahr')) || Number(heute().slice(0, 4));
+    return json(res, 200, { mitarbeiter: m, luecken: PERS.luecken(m), urlaub: PERS.urlaub(db, m, jahr),
+      dokumente: db.prepare('SELECT id, art, titel, typ, gueltig_bis, notiz, angelegt_am FROM mitarbeiter_dokument WHERE mitarbeiter_id = ? ORDER BY angelegt_am DESC').all(m.id),
+      abwesenheiten: db.prepare("SELECT * FROM abwesenheit WHERE mitarbeiter_id = ? AND bis >= ? ORDER BY von DESC").all(m.id, (jahr - 1) + '-01-01'),
+      objekte: db.prepare('SELECT o.id, o.name FROM einsatz e JOIN objekt o ON o.id = e.objekt_id WHERE e.mitarbeiter_id = ? ORDER BY o.name').all(m.id),
+      schichten: DP.schichtenZeitraum(db, heute(), plusTageIso(heute(), 13), m.id),
+      fristen: PERS.fristen(db, heute(), 90).filter(function (f) { return f.mitarbeiter_id === m.id; }) });
+  }
+  if (p === '/api/personal' && req.method === 'POST') {
+    const b = await leib(req), id = Number(b.id); if (!id || !db.prepare('SELECT 1 FROM mitarbeiter WHERE id = ?').get(id)) throw new Fehler(404, 'Mitarbeiter nicht gefunden');
+    let w; try { w = PERS.lesen(b); } catch (e) { throw new Fehler(400, e.message); }
+    const sp = Object.keys(w); if (sp.length) db.prepare('UPDATE mitarbeiter SET ' + sp.map(function (s) { return s + ' = ?'; }).join(', ') + ' WHERE id = ?').run(...sp.map(function (s) { return w[s]; }), id);
+    if ('beschaeftigungsart' in w) db.prepare('UPDATE mitarbeiter SET minijob = ? WHERE id = ?').run(w.beschaeftigungsart === 'minijob' ? 1 : 0, id);
+    // Anzeigename folgt Vor- und Nachname, sobald beide da sind
+    const m = db.prepare('SELECT vorname, nachname FROM mitarbeiter WHERE id = ?').get(id); if (m.vorname && m.nachname) db.prepare('UPDATE mitarbeiter SET name = ? WHERE id = ?').run(m.vorname + ' ' + m.nachname, id);
+    // Austritt in der Vergangenheit → gesperrt, keine App-Anmeldung mehr
+    if (w.austritt && w.austritt < heute()) { db.prepare('UPDATE mitarbeiter SET aktiv = 0 WHERE id = ?').run(id); db.prepare('DELETE FROM sitzung WHERE mitarbeiter_id = ?').run(id); }
+    return json(res, 200, { ok: true, luecken: PERS.luecken(db.prepare('SELECT * FROM mitarbeiter WHERE id = ?').get(id)) });
+  }
+  if (p === '/api/personal/felder') return json(res, 200, { felder: PERS.FELDER, gruppen: PERS.GRUPPEN, dokumentarten: PERS.DOKUMENTARTEN });
+  if (p === '/api/personal/fristen') return json(res, 200, PERS.fristen(db, heute(), Number(q.get('tage')) || 60));
+  if (p === '/api/personal/auswertung') { const m = q.get('monat') || heute().slice(0, 7); if (!/^\d{4}-\d{2}$/.test(m)) throw new Fehler(400, 'Monat im Format JJJJ-MM'); return json(res, 200, { monat: m, mitarbeiter: PERS.auswertung(db, m) }); }
+  if (p === '/api/personal/urlaub') { const j = Number(q.get('jahr')) || Number(heute().slice(0, 4)); return json(res, 200, { jahr: j, mitarbeiter: db.prepare('SELECT * FROM mitarbeiter WHERE aktiv = 1 ORDER BY name').all().map(function (m) { return Object.assign({ id: m.id, name: m.name }, PERS.urlaub(db, m, j)); }) }); }
+  if (p === '/api/personal/stammdaten.csv') { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Personalstammdaten_' + heute() + '.csv"', 'Cache-Control': 'no-store' }); return res.end(PERS.stammdatenDatei(db)); }
+  if (p === '/api/personal/fragebogen') {
+    const m = q.get('id') ? db.prepare('SELECT * FROM mitarbeiter WHERE id = ?').get(Number(q.get('id'))) : null; if (q.get('id') && !m) throw new Fehler(404, 'Mitarbeiter nicht gefunden');
+    const buf = await BRIEF.personalfragebogen(db, m);
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="Personalfragebogen' + (m ? '_' + String(m.name).replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') : '') + '.pdf"', 'Cache-Control': 'no-store' }); return res.end(buf);
+  }
+  if (p === '/api/personal/dokument' && req.method === 'GET') {
+    const d = db.prepare('SELECT * FROM mitarbeiter_dokument WHERE id = ?').get(Number(q.get('id'))); if (!d) throw new Fehler(404, 'Dokument nicht gefunden');
+    const datei = path.join(PERSONAL, path.basename(d.datei)); if (!fs.existsSync(datei)) throw new Fehler(404, 'Datei fehlt');
+    res.writeHead(200, { 'Content-Type': d.typ || 'application/octet-stream', 'Content-Disposition': 'inline; filename="' + String(d.titel || d.art).replace(/[^A-Za-zÄÖÜäöüß0-9.]+/g, '_') + path.extname(d.datei) + '"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    return fs.createReadStream(datei).pipe(res);
+  }
+  if (p === '/api/personal/dokument' && req.method === 'POST') {
+    const b = await leib(req);
+    if (b.id && b.loeschen) { const d = db.prepare('SELECT * FROM mitarbeiter_dokument WHERE id = ?').get(Number(b.id)); if (d) { db.prepare('DELETE FROM mitarbeiter_dokument WHERE id = ?').run(d.id); try { fs.unlinkSync(path.join(PERSONAL, path.basename(d.datei))); } catch (e) {} } return json(res, 200, { ok: true }); }
+    if (b.id) { db.prepare('UPDATE mitarbeiter_dokument SET titel = ?, gueltig_bis = ?, notiz = ? WHERE id = ?').run(b.titel || null, /^\d{4}-\d{2}-\d{2}$/.test(b.gueltig_bis || '') ? b.gueltig_bis : null, b.notiz || null, Number(b.id)); return json(res, 200, { ok: true }); }
+    if (!db.prepare('SELECT 1 FROM mitarbeiter WHERE id = ?').get(Number(b.mitarbeiter_id))) throw new Fehler(404, 'Mitarbeiter nicht gefunden');
+    const m = String(b.datei || '').match(/^data:(application\/pdf|image\/jpeg|image\/png|image\/webp);base64,(.+)$/); if (!m) throw new Fehler(400, 'Bitte PDF, JPG oder PNG hochladen.');
+    const inhalt = Buffer.from(m[2], 'base64'); if (inhalt.length > 10e6) throw new Fehler(413, 'Die Datei ist größer als 10 MB.');
+    const endung = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[m[1]];
+    const name = 'ma' + Number(b.mitarbeiter_id) + '-' + Date.now() + '-' + require('crypto').randomBytes(4).toString('hex') + endung;
+    fs.writeFileSync(path.join(PERSONAL, name), inhalt);
+    const art = PERS.DOKUMENTARTEN.some(function (a) { return a[0] === b.art; }) ? b.art : 'sonstiges';
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO mitarbeiter_dokument (mitarbeiter_id, art, titel, datei, typ, gueltig_bis, notiz) VALUES (?,?,?,?,?,?,?)').run(Number(b.mitarbeiter_id), art, b.titel || null, name, m[1], /^\d{4}-\d{2}-\d{2}$/.test(b.gueltig_bis || '') ? b.gueltig_bis : null, b.notiz || null).lastInsertRowid) });
   }
   if (p === '/api/einsatz' && req.method === 'POST') {
     const b = await leib(req);
@@ -521,8 +637,65 @@ async function bueroApi(req, res, p, q, ich) {
     if (b.status === 'abgelehnt') { db.prepare("UPDATE auftrag SET status = 'abgelehnt', antwort = ? WHERE id = ?").run(b.antwort || null, a.id); return json(res, 200, { ok: true }); }
     throw new Fehler(400, 'Unbekannter Status');
   }
-  if (p === '/api/rechnungen') return json(res, 200, db.prepare(`SELECT r.id, r.nummer, r.status, r.datum, r.faellig, r.zeitraum_von, r.zeitraum_bis, r.netto, r.brutto, r.bezahlt_am, r.storno_von, k.name kunde, o.name objekt
-      FROM rechnung r JOIN kunde k ON k.id = r.kunde_id LEFT JOIN objekt o ON o.id = r.objekt_id ${q.get('status') ? 'WHERE r.status = ?' : ''} ORDER BY r.nummer IS NOT NULL, r.nummer DESC, r.id DESC LIMIT 500`).all(...(q.get('status') ? [q.get('status')] : [])));
+  if (p === '/api/rechnungen') return json(res, 200, db.prepare(`SELECT r.id, r.nummer, r.status, r.datum, r.faellig, r.zeitraum_von, r.zeitraum_bis, r.netto, r.brutto, r.bezahlt_am, r.storno_von, r.betreff, r.bestellnummer, r.mahnsperre, r.kunde_id, k.name kunde, k.kundennummer, o.name objekt,
+      (SELECT COALESCE(SUM(z.betrag),0) FROM zahlung z WHERE z.rechnung_id = r.id) bezahlt_summe, (SELECT MAX(m.stufe) FROM mahnung m WHERE m.rechnung_id = r.id) mahnstufe
+      FROM rechnung r JOIN kunde k ON k.id = r.kunde_id LEFT JOIN objekt o ON o.id = r.objekt_id ${q.get('status') ? 'WHERE r.status = ?' : ''} ORDER BY r.nummer IS NOT NULL, r.nummer DESC, r.id DESC LIMIT 2000`).all(...(q.get('status') ? [q.get('status')] : []))
+    .map(function (r) { r.offen = (r.status === 'gestellt' && !r.storno_von) ? AB.r2(r.brutto - r.bezahlt_summe) : 0; return r; }));
+  // Kennzahlen der Rechnungsübersicht
+  if (p === '/api/abrechnung/kennzahlen') {
+    const j = heute().slice(0, 4), m = heute().slice(0, 7);
+    const umsatz = like => AB.r2(db.prepare("SELECT COALESCE(SUM(netto),0) s FROM rechnung WHERE nummer IS NOT NULL AND datum LIKE ?").get(like + '%').s);   // Stornos sind negativ und heben auf
+    const op = MW.offenePosten(db);
+    return json(res, 200, { umsatzJahr: umsatz(j), umsatzMonat: umsatz(m), offen: AB.r2(op.reduce(function (a, x) { return a + x.offen; }, 0)), offenAnzahl: op.length,
+      ueberfaellig: AB.r2(op.filter(function (x) { return x.tageUeberfaellig > 0; }).reduce(function (a, x) { return a + x.offen; }, 0)), ueberfaelligAnzahl: op.filter(function (x) { return x.tageUeberfaellig > 0; }).length,
+      eingangMonat: AB.r2(db.prepare("SELECT COALESCE(SUM(betrag),0) s FROM zahlung WHERE art <> 'ausbuchung' AND datum LIKE ?").get(m + '%').s), mahnfaellig: op.filter(function (x) { return x.naechsteStufe != null; }).length,
+      entwuerfe: db.prepare("SELECT COUNT(*) n FROM rechnung WHERE status = 'entwurf'").get().n });
+  }
+  // --- Offene Posten und Mahnwesen
+  if (p === '/api/offene-posten' || p === '/api/offene-posten.csv') {
+    const op = MW.offenePosten(db, q.get('stichtag') || heute());
+    if (p === '/api/offene-posten') return json(res, 200, { stichtag: q.get('stichtag') || heute(), posten: op, alter: MW.altersstruktur(op), summe: AB.r2(op.reduce(function (a, x) { return a + x.offen; }, 0)) });
+    const z = v => { v = v == null ? '' : String(v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }, dd = d => d ? d.split('-').reverse().join('.') : '', bt = v => (Number(v) || 0).toFixed(2).replace('.', ',');
+    const zeilen = ['Rechnung;Kunde;Kundennr.;Objekt;Rechnungsdatum;Fällig;Tage überfällig;Brutto;Offen;Mahnstufe;Letzte Mahnung;Mahnsperre'].concat(op.map(function (x) { return [x.nummer, x.kunde, x.kundennummer, x.objekt, dd(x.datum), dd(x.faellig), x.tageUeberfaellig, bt(x.brutto), bt(x.offen), x.mahnstufeText, dd(x.letzteMahnung), x.mahnsperre ? 'ja' : ''].map(z).join(';'); }));
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Offene_Posten_' + heute() + '.csv"' }); return res.end('﻿' + zeilen.join('\r\n') + '\r\n');
+  }
+  if (p === '/api/mahnungen') return json(res, 200, db.prepare('SELECT m.*, r.nummer, k.name kunde FROM mahnung m JOIN rechnung r ON r.id = m.rechnung_id JOIN kunde k ON k.id = r.kunde_id ORDER BY m.datum DESC, m.id DESC LIMIT 500').all().map(function (m) { m.titel = MW.STUFE[m.stufe]; return m; }));
+  if (p === '/api/mahnung/vorschau') {
+    const op = MW.offenePosten(db).find(function (x) { return x.id === Number(q.get('rechnung')); }); if (!op) throw new Fehler(404, 'Rechnung ist nicht offen');
+    if (op.naechsteStufe == null) return json(res, 200, { faellig: false, grund: op.grund });
+    return json(res, 200, Object.assign({ faellig: true }, MW.berechnen(db, db.prepare('SELECT * FROM rechnung WHERE id = ?').get(op.id), op.naechsteStufe, heute())));
+  }
+  if (p === '/api/mahnung/pdf') {
+    let buf; try { buf = await BRIEF.mahnung(db, q.get('id')); } catch (e) { throw new Fehler(404, e.message); }
+    const m = MW.voll(db, q.get('id'));
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': (q.get('download') === '1' ? 'attachment' : 'inline') + '; filename="' + m.titel.replace(/[^A-Za-z0-9ÄÖÜäöüß.]+/g, '_') + '_' + m.rechnung.nummer + '.pdf"', 'Cache-Control': 'no-store' }); return res.end(buf);
+  }
+  if ((p === '/api/mahnung' || p === '/api/mahnlauf' || p === '/api/mahnung/zuruecknehmen') && req.method === 'POST') {
+    const b = await leib(req);
+    try {
+      if (p === '/api/mahnung') return json(res, 200, Object.assign({ ok: true }, MW.anlegen(db, b.rechnung_id)));
+      if (p === '/api/mahnlauf') return json(res, 200, Object.assign({ ok: true }, MW.lauf(db, Array.isArray(b.ids) ? b.ids : null)));
+      MW.zuruecknehmen(db, b.id); return json(res, 200, { ok: true });
+    } catch (e) { throw new Fehler(400, e.message); }
+  }
+  if (p === '/api/basiszins' && req.method === 'GET') return json(res, 200, db.prepare('SELECT * FROM basiszins ORDER BY gueltig_ab DESC').all());
+  if (p === '/api/basiszins' && req.method === 'POST') {
+    const b = await leib(req);
+    if (b.loeschen) { db.prepare('DELETE FROM basiszins WHERE gueltig_ab = ?').run(String(b.gueltig_ab)); return json(res, 200, { ok: true }); }
+    if (!/^\d{4}-(01|07)-01$/.test(b.gueltig_ab || '')) throw new Fehler(400, 'Der Basiszinssatz gilt jeweils ab 01.01. oder 01.07.');
+    const pz = Number(String(b.prozent).replace(',', '.')); if (!isFinite(pz) || pz < -5 || pz > 15) throw new Fehler(400, 'Prozentsatz prüfen');
+    db.prepare('INSERT INTO basiszins (gueltig_ab, prozent, quelle) VALUES (?,?,?) ON CONFLICT(gueltig_ab) DO UPDATE SET prozent = excluded.prozent, quelle = excluded.quelle').run(b.gueltig_ab, pz, b.quelle || 'von Hand'); return json(res, 200, { ok: true });
+  }
+  // --- Artikel / Leistungsstamm (für freie Rechnungen)
+  if (p === '/api/artikel' && req.method === 'GET') return json(res, 200, db.prepare('SELECT * FROM artikel ORDER BY aktiv DESC, nummer, bezeichnung').all());
+  if (p === '/api/artikel' && req.method === 'POST') {
+    const b = await leib(req);
+    if (b.id && b.loeschen) { db.prepare('UPDATE artikel SET aktiv = 0 WHERE id = ?').run(Number(b.id)); return json(res, 200, { ok: true }); }
+    if (!String(b.bezeichnung || '').trim() || zahl(b.preis) == null && Number(b.preis) !== 0) throw new Fehler(400, 'Bezeichnung und Preis nötig');
+    const f = [String(b.nummer || '').trim() || null, String(b.bezeichnung).trim(), String(b.beschreibung || '').trim() || null, b.einheit || 'Std.', Number(String(b.preis).replace(',', '.')), b.aktiv === false ? 0 : 1];
+    if (b.id) { db.prepare('UPDATE artikel SET nummer=?, bezeichnung=?, beschreibung=?, einheit=?, preis=?, aktiv=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO artikel (nummer, bezeichnung, beschreibung, einheit, preis, aktiv) VALUES (?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+  }
   if (p === '/api/rechnung' && req.method === 'GET') { const r = AB.voll(db, q.get('id')); if (!r) throw new Fehler(404, 'Rechnung nicht gefunden'); r.luecken = r.status === 'entwurf' ? AB.pflichtLuecken(db, r) : []; return json(res, 200, r); }
   if (p === '/api/rechnung/vorschlag') { try { const v = AB.vorschlag(db, q.get('objekt'), q.get('monat')); return json(res, 200, { von: v.von, bis: v.bis, positionen: v.positionen, hinweise: v.hinweise }); } catch (e) { throw new Fehler(400, e.message); } }
   if (p === '/api/rechnung/pdf') {
@@ -544,6 +717,14 @@ async function bueroApi(req, res, p, q, ich) {
       if (p === '/api/rechnung/stornieren') return json(res, 200, { ok: true, nummer: AB.stornieren(db, b.id) });
       if (p === '/api/rechnung/bezahlt') { AB.bezahlt(db, b.id, b.datum, b.zurueck); return json(res, 200, { ok: true }); }
       if (p === '/api/rechnung/loeschen') { AB.loeschen(db, b.id); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/frei') return json(res, 200, Object.assign({ ok: true }, AB.frei(db, b)));
+      if (p === '/api/rechnung/kopf') { AB.kopfAendern(db, b); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/objekt') return json(res, 200, Object.assign({ ok: true }, AB.objektUebernehmen(db, b.id, b.objekt_id, b.monat)));
+      if (p === '/api/rechnung/artikel') { AB.artikelUebernehmen(db, b.id, b.artikel_id, b.menge, b.gruppe); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/verschieben') { AB.verschieben(db, b.id, b.position_id, b.richtung); return json(res, 200, { ok: true }); }
+      if (p === '/api/rechnung/kopieren') return json(res, 200, { ok: true, id: AB.kopieren(db, b.id, b) });
+      if (p === '/api/rechnung/zahlung') return json(res, 200, Object.assign({ ok: true }, AB.zahlungBuchen(db, b)));
+      if (p === '/api/rechnung/mahnsperre') { MW.sperre(db, b.id, !!b.an, b.grund); return json(res, 200, { ok: true }); }
     } catch (e) { if (e instanceof Fehler) throw e; throw new Fehler(400, e.message); }
   }
   // --- Stammdaten: Kunden, Konten, Tarife, Einstellungen
@@ -580,6 +761,8 @@ async function bueroApi(req, res, p, q, ich) {
 // ---------------------------------------------------------------- Fotos (nur, wer das Objekt sehen darf)
 function fotoErlaubt(ich, datei) {
   if (!ich) return false; if (ich.rolle === 'buero') return true;
+  const c = datei.match(/^c(\d+)-/);   // Chatbild: wer den Kanal sehen darf, sieht das Bild
+  if (c) { if (ich.rolle !== 'mitarbeiter') return false; const k = db.prepare('SELECT * FROM kanal WHERE id = ?').get(Number(c[1])); return !!k && (k.art === 'direkt' ? k.schluessel.split(':').indexOf('m' + ich.mitarbeiter.id) > 0 : !!k.app); }
   const m = datei.match(/^[fmk](\d+)-/); if (!m) return false;
   let oid = null;
   if (datei[0] === 'f') { const p = db.prepare('SELECT objekt_id FROM lv_position WHERE id = ?').get(Number(m[1])); oid = p && p.objekt_id; } else oid = Number(m[1]);
@@ -599,6 +782,7 @@ const server = http.createServer(async function (req, res) {
       const ich = Z.wer(db, req);
       if (p === '/api/ich') return json(res, ich ? 200 : 401, ich ? { rolle: ich.rolle, name: ich.name } : { fehler: 'nicht angemeldet' });
       if (!ich) throw new Fehler(401, 'Bitte anmelden.');
+      if (p.startsWith('/api/komm/') || p.startsWith('/api/planner/')) { if (ich.rolle === 'kunde') throw new Fehler(403, 'Kein Zugriff.'); return await kommApi(req, res, p, q, ich); }
       if (p.startsWith('/api/app/')) { if (ich.rolle !== 'mitarbeiter') throw new Fehler(403, 'Nur in der Mitarbeiter-App.'); return await appApi(req, res, p, q, ich); }
       if (p.startsWith('/api/kunde/')) { if (ich.rolle !== 'kunde') throw new Fehler(403, 'Nur im Kundenportal.'); return await kundeApi(req, res, p, q, ich); }
       if (ich.rolle !== 'buero') throw new Fehler(403, 'Kein Zugriff.');
