@@ -1,4 +1,4 @@
-# StaffClean-Software
+# Glanzwerk — StaffClean-Software
 
 Eigene Software der **StaffClean GmbH** für die Gebäudereinigung — selbst geschrieben, nichts gekauft.
 Konzept und Marktrecherche: `E:\StaffClean-Gehirn\_wissen\konzept_software.md`.
@@ -8,31 +8,34 @@ Konzept und Marktrecherche: `E:\StaffClean-Gehirn\_wissen\konzept_software.md`.
 
 ```
 npm install
-npm start          # http://127.0.0.1:8790
-npm test           # Turnus-Regeln, Feiertage, LV-Import
+npm start          # http://127.0.0.1:8790  (erstes Büro-Konto über /einrichten, nur am Rechner selbst)
+npm test           # Turnus, Feiertage, LV-Import, Schnittstelle (18 Tests)
+npm run abnahme    # Browser-Abnahme: klickt jeden Knopf in Büro, App, Kundenportal (+ WebKit)
 ```
 
-| Adresse | Was |
-|---|---|
-| `/` | Büro: Übersicht, Objekte mit LV-Raster, Tagesplan, LV-Import, Mitarbeiter, Mängel |
-| `/app` | Mitarbeiter-App (Handy): Heute → Objekt → Raum → abhaken, Foto, Mangel melden |
-| `/gestaltung` | Design-System (Farben, Schrift, Bausteine — abgeleitet von staffclean.de) |
+| Adresse | Wer | Was |
+|---|---|---|
+| `/` | Büro | Übersicht mit Alarmen, Dienstplan, Objekte (LV-Raster, Woche, Kalkulation & Angebot, Standort & QR, Team/Mängel/Prüfungen), Tagesplan, LV-Import, Einsatz (Abwesenheit, Vertretung, Minijob-Auslastung), Qualität, Zeiten & Lohn (Soll/Ist, Zuschläge, DATEV), Mitarbeiter, Kunden & Portal-Zugänge, Mängel, Stammdaten |
+| `/app` | Mitarbeiter (PIN) | Heute → Objekt → Kommen/Gehen stempeln am Standort → Raum per QR-Code oder Liste → abhaken, Foto, Mangel melden; Schichten bestätigen, Vertretung zu-/absagen; ohne Netz wird nachgereicht; DE/PL/RO/EN |
+| `/kunde` | Kunde (Passwort) | eigene Objekte, Leistungsnachweis 14 Tage mit Fotos, Prüfberichte abzeichnen, Reklamation mit Foto |
+| `/drucken/qr`, `/drucken/angebot`, `/drucken/pruefung` | Büro (Bericht auch Kunde) | QR-Aufkleber je Raum, Angebot ohne interne Kalkulation, Prüfbericht |
+| `/gestaltung` | – | Design-System (abgeleitet von staffclean.de) |
 
-Beim ersten Start werden **erfundene Beispieldaten** angelegt (`STAFFCLEAN_DEMO=0` schaltet das ab).
-Daten liegen in `daten\` (SQLite + Fotos, nicht im Git).
+Beim ersten Start werden **erfundene Beispieldaten** angelegt (`STAFFCLEAN_DEMO=0` schaltet das ab; die Demo-PINs 1111/2222 gibt es dann nicht).
+Daten liegen in `daten\` (SQLite + Fotos, nicht im Git), anderer Ort über `STAFFCLEAN_DATEN`.
 
-## Stand v0.1 (28.09.2026) — Stufe 1
+## Sicherheit
 
-- **Leistungsverzeichnis als Raster** Raum × Tätigkeit × Turnus, direkt im Browser bearbeitbar.
-- **Turnus als Kalenderregel** (`lib/turnus.js`): `5 W`, `3 W` (Mo/Mi/Fr), `2 W` (Di/Fr), `1 W` (Reinigungstag des Objekts), `2,5 W` (Wechselwoche), `14T`, `1 M`/`2 M`, `1 Q`/`1 H`/`1 J`, Wochentagslisten (`Mo,Do`), `B` = bei Bedarf. Feiertage je Bundesland (`lib/feiertage.js`); Monats-/Quartalstermine rutschen am Feiertag weiter.
-- **Aufgaben werden je Tag berechnet**, nicht gespeichert — ein geänderter Turnus hinterlässt nie alte Aufgaben. Gespeichert wird nur, was passiert ist (Erledigung mit Zeit, Person, Foto; Mängel).
-- **Excel-Import** (`lib/lv-import.js`) nach der Vorlage der Treppenhaus-LVs: Kopfzeile „Räume | Belag | Tätigkeiten…", Kunde, Legende, „Bei Bedarf". Erst Vorschau, dann Objekt anlegen.
-- **Mitarbeiter-App** mit großen Tippflächen, Foto (am Handy verkleinert), Mangel melden, Oberfläche auf Deutsch/Polnisch/Englisch.
+- Jede Schnittstelle außer Anmelden verlangt eine Sitzung; Rollen **buero / mitarbeiter / kunde** sind strikt getrennt (Kunde sieht nur eigene Objekte, Mitarbeiter nur eigene Einsätze, Fotos ebenso).
+- Passwörter und PINs nur als scrypt-Prüfwert; Sitzungs-Cookie HttpOnly/SameSite; 8 Fehlversuche je 15 Minuten.
+- Das erste Büro-Konto lässt sich nur direkt am Rechner anlegen. Läuft nur auf `127.0.0.1`, bis ein Betrieb mit HTTPS eingerichtet ist (`STAFFCLEAN_HTTPS=1` setzt das Secure-Cookie).
 
-## Nächste Schritte
+## Fachliches
 
-1. **Zugänge** (Büro-Login, Mitarbeiter-PIN, Kunde) — vorher nicht ins Netz.
-2. QR/NFC am Raum (Kennung `raum.code` ist schon da), Stempeln am Objekt (GPS), Arbeitszeit nach MiLoG.
-3. Qualitätsprüfung nach DIN EN 13549, Kundenportal mit Nachweisen.
-4. Kalkulation (Minuten je Tätigkeit → Leistungswert → Tarif mit Gültigkeit), Einsatzplan mit Minijob-Grenze.
-5. Offline-Speicher in der App, automatische Übersetzung der Tätigkeiten, Betrieb auf eigenem Server (`app.staffclean.de`).
+- **Turnus als Kalenderregel** (`lib/turnus.js`): `5 W`, `3 W` (Mo/Mi/Fr), `2 W` (Di/Fr), `1 W` (Reinigungstag), `2,5 W` (Wechselwoche), `14T`, `1 M`/`2 M`, `1 Q`/`1 H`/`1 J`, Wochentagslisten (`Mo,Do`), `B` = bei Bedarf. Feiertage je Bundesland.
+- **Aufgaben werden je Tag berechnet**, nicht gespeichert. Gespeichert wird nur, was passiert ist.
+- **Kalkulation** (`lib/kalkulation.js`): Minuten × Häufigkeit (12-Monats-Mittel inkl. Feiertage) + Wegezeit → Stunden × Tarif (mit Gültigkeit) × Lohnnebenkosten × Gemeinkosten × Gewinn = Monatspreis. Der Leistungswert m²/Std. ist Ergebnis, keine Eingabe.
+- **Qualität** (`lib/qualitaet.js`): Stichprobe angelehnt an DIN EN 13549, feste Prüfelemente je Raumart, jeder Fehler wird ein Mangel mit Frist.
+- **Dienstplan** (`lib/dienstplan.js`): Konflikte nach ArbZG (Überschneidung, unter 11 Std. Ruhezeit, über 10 Std. am Tag, Pausen), Abwesenheit, Minijob-Grenze; Serien, Vorwoche übernehmen.
+- **Stunden & DATEV**: Ist aus Stempelzeiten mit Nacht-, Sonntags- und Feiertagsanteil; Export als Bewegungsdaten (Personalnummer, Lohnart, Stunden). ⚠ Die Lohnart-Nummern sind Platzhalter — mit dem Lohnbüro abstimmen.
+- **Stempeln mit Standort**: nur im Umkreis des Objekts (Standard 150 m); der Standort wird bei jedem Stempeln frisch ermittelt.
