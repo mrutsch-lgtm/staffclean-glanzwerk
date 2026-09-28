@@ -19,6 +19,7 @@ const GEO = require('./lib/geo');
 const DP = require('./lib/dienstplan');
 const AB = require('./lib/abrechnung');
 const KAT = require('./lib/katalog');
+const PDFR = require('./lib/pdf/rechnung');
 
 const PORT = Number(process.env.STAFFCLEAN_PORT || 8790);
 const HOST = process.env.STAFFCLEAN_HOST || '127.0.0.1';
@@ -75,6 +76,14 @@ function pruefungVoll(id) {
   p.raeume = db.prepare('SELECT pr.raum_id, pr.kriterien, pr.fehler, r.name, r.etage FROM pruefung_raum pr JOIN raum r ON r.id = pr.raum_id WHERE pr.pruefung_id = ? ORDER BY r.reihenfolge, r.id').all(p.id)
     .map(function (r) { r.kriterien = JSON.parse(r.kriterien || '[]'); return r; });
   return p;
+}
+
+// Rechnung als PDF (gestellt: ZUGFeRD mit eingebetteter XML; Entwurf: mit ENTWURF-Stempel, ohne XML)
+async function pdfSenden(res, r, download) {
+  const buf = await PDFR.erzeugen(db, r);
+  const name = (r.storno_von ? 'Stornorechnung_' : r.nummer ? 'Rechnung_' : 'Rechnungsentwurf_') + (r.nummer || r.id) + '.pdf';
+  res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': (download ? 'attachment' : 'inline') + '; filename="' + name + '"', 'Cache-Control': 'no-store' });
+  return res.end(buf);
 }
 
 // ---------------------------------------------------------------- Öffentlich (ohne Anmeldung)
@@ -228,6 +237,7 @@ async function kundeApi(req, res, p, q, ich) {
   }
   if (p === '/api/kunde/rechnungen') return json(res, 200, db.prepare("SELECT r.id, r.nummer, r.status, r.datum, r.faellig, r.zeitraum_von, r.zeitraum_bis, r.brutto, r.storno_von, o.name objekt FROM rechnung r LEFT JOIN objekt o ON o.id = r.objekt_id WHERE r.kunde_id = ? AND r.status <> 'entwurf' ORDER BY r.nummer DESC").all(kid));
   if (p === '/api/kunde/rechnung') { const r = AB.voll(db, q.get('id')); if (!r || r.kunde_id !== kid || r.status === 'entwurf') throw new Fehler(404, 'Rechnung nicht gefunden.'); return json(res, 200, r); }
+  if (p === '/api/kunde/rechnung-pdf') { const r = AB.voll(db, q.get('id')); if (!r || r.kunde_id !== kid || r.status === 'entwurf') throw new Fehler(404, 'Rechnung nicht gefunden.'); return pdfSenden(res, r, q.get('download') === '1'); }
   if (p === '/api/kunde/xrechnung') {
     const r = AB.voll(db, q.get('id')); if (!r || r.kunde_id !== kid || r.status === 'entwurf') throw new Fehler(404, 'Rechnung nicht gefunden.');
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + r.nummer + '.xml"' }); return res.end(AB.xrechnung(db, r.id));
@@ -255,9 +265,11 @@ async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/objekt' && req.method === 'POST') {
     const b = await leib(req);
     if (!String(b.name || '').trim()) throw new Fehler(400, 'Name fehlt');
-    const f = [b.name, b.kunde_id ? Number(b.kunde_id) : null, b.strasse || null, b.plz || null, b.ort || null, b.bundesland || 'SH', Number.isInteger(b.reinigungstag) ? b.reinigungstag : 1, b.zugang || null, b.notiz || null, zahl(b.radius_m) || 150];
-    if (b.id) { db.prepare('UPDATE objekt SET name=?, kunde_id=?, strasse=?, plz=?, ort=?, bundesland=?, reinigungstag=?, zugang=?, notiz=?, radius_m=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO objekt (name, kunde_id, strasse, plz, ort, bundesland, reinigungstag, zugang, notiz, radius_m) VALUES (?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+    const art = ['pauschale', 'stunden', 'beides'].indexOf(b.abrechnungsart) >= 0 ? b.abrechnungsart : 'pauschale';
+    if (art !== 'pauschale' && !zahl(b.stundensatz)) throw new Fehler(400, 'Für die Abrechnung nach Stunden bitte einen Stundensatz angeben.');
+    const f = [b.name, b.kunde_id ? Number(b.kunde_id) : null, b.strasse || null, b.plz || null, b.ort || null, b.bundesland || 'SH', Number.isInteger(b.reinigungstag) ? b.reinigungstag : 1, b.zugang || null, b.notiz || null, zahl(b.radius_m) || 150, art, zahl(b.stundensatz)];
+    if (b.id) { db.prepare('UPDATE objekt SET name=?, kunde_id=?, strasse=?, plz=?, ort=?, bundesland=?, reinigungstag=?, zugang=?, notiz=?, radius_m=?, abrechnungsart=?, stundensatz=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO objekt (name, kunde_id, strasse, plz, ort, bundesland, reinigungstag, zugang, notiz, radius_m, abrechnungsart, stundensatz) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
   }
   if (p === '/api/objekt/status' && req.method === 'POST') { const b = await leib(req); db.prepare('UPDATE objekt SET status = ? WHERE id = ?').run(b.status === 'ruht' ? 'ruht' : 'aktiv', Number(b.id)); return json(res, 200, { ok: true }); }
   if (p === '/api/objekt/standort' && req.method === 'POST') {
@@ -488,6 +500,11 @@ async function bueroApi(req, res, p, q, ich) {
       FROM rechnung r JOIN kunde k ON k.id = r.kunde_id LEFT JOIN objekt o ON o.id = r.objekt_id ${q.get('status') ? 'WHERE r.status = ?' : ''} ORDER BY r.nummer IS NOT NULL, r.nummer DESC, r.id DESC LIMIT 500`).all(...(q.get('status') ? [q.get('status')] : [])));
   if (p === '/api/rechnung' && req.method === 'GET') { const r = AB.voll(db, q.get('id')); if (!r) throw new Fehler(404, 'Rechnung nicht gefunden'); r.luecken = r.status === 'entwurf' ? AB.pflichtLuecken(db, r) : []; return json(res, 200, r); }
   if (p === '/api/rechnung/vorschlag') { try { const v = AB.vorschlag(db, q.get('objekt'), q.get('monat')); return json(res, 200, { von: v.von, bis: v.bis, positionen: v.positionen, hinweise: v.hinweise }); } catch (e) { throw new Fehler(400, e.message); } }
+  if (p === '/api/rechnung/pdf') {
+    const r = AB.voll(db, q.get('id')); if (!r) throw new Fehler(404, 'Rechnung nicht gefunden');
+    return pdfSenden(res, r, q.get('download') === '1');
+  }
+  if (p === '/api/abrechnungslaeufe') return json(res, 200, db.prepare('SELECT * FROM abrechnungslauf ORDER BY id DESC LIMIT 24').all().map(function (l) { l.ergebnis = JSON.parse(l.ergebnis || '{}'); return l; }));
   if (p === '/api/rechnung/xrechnung') {
     let xml; try { xml = AB.xrechnung(db, q.get('id')); } catch (e) { throw new Fehler(400, e.message); }
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + AB.voll(db, q.get('id')).nummer + '.xml"' }); return res.end(xml);
@@ -495,12 +512,8 @@ async function bueroApi(req, res, p, q, ich) {
   if (p.startsWith('/api/rechnung/') && req.method === 'POST') {
     const b = await leib(req);
     try {
-      if (p === '/api/rechnung/entwurf') return json(res, 200, Object.assign({ ok: true }, AB.entwurf(db, b.objekt_id, b.monat)));
-      if (p === '/api/rechnung/entwuerfe') {
-        const aus = { angelegt: [], uebersprungen: [] };
-        db.prepare("SELECT id, name FROM objekt WHERE status = 'aktiv' AND kunde_id IS NOT NULL ORDER BY name").all().forEach(function (o) { try { aus.angelegt.push({ objekt: o.name, id: AB.entwurf(db, o.id, b.monat).id }); } catch (e) { aus.uebersprungen.push({ objekt: o.name, grund: e.message }); } });
-        return json(res, 200, Object.assign({ ok: true }, aus));
-      }
+      if (p === '/api/rechnung/entwurf') return json(res, 200, Object.assign({ ok: true }, b.kunde_id ? AB.entwurfKunde(db, b.kunde_id, b.monat) : AB.entwurf(db, b.objekt_id, b.monat)));
+      if (p === '/api/rechnung/entwuerfe' || p === '/api/rechnung/lauf') return json(res, 200, Object.assign({ ok: true }, AB.lauf(db, b.monat, { stellen: !!b.stellen, art: 'hand' })));
       if (p === '/api/rechnung/position') { AB.position(db, b); return json(res, 200, { ok: true }); }
       if (p === '/api/rechnung/stellen') return json(res, 200, { ok: true, nummer: AB.stellen(db, b.id) });
       if (p === '/api/rechnung/stornieren') return json(res, 200, { ok: true, nummer: AB.stornieren(db, b.id) });
@@ -512,9 +525,12 @@ async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/kunden' && req.method === 'GET') return json(res, 200, db.prepare('SELECT k.*, (SELECT COUNT(*) FROM objekt o WHERE o.kunde_id = k.id) objekte, (SELECT COUNT(*) FROM benutzer b WHERE b.kunde_id = k.id) zugaenge FROM kunde k ORDER BY k.name').all());
   if (p === '/api/kunde' && req.method === 'POST') {
     const b = await leib(req); if (!String(b.name || '').trim()) throw new Fehler(400, 'Name fehlt');
-    const f = [b.name, b.ansprechpartner || null, b.email || null, b.telefon || null, b.anschrift || null, b.plz || null, b.ort || null, b.kundennummer || null, b.leitweg_id || null, b.ust_id || null];
-    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id) VALUES (?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
+    const format = ['zugferd', 'xrechnung', 'pdf'].indexOf(b.rechnungsformat) >= 0 ? b.rechnungsformat : 'zugferd';
+    if (format === 'xrechnung' && !b.leitweg_id) throw new Fehler(400, 'Für XRechnung (öffentliche Auftraggeber) bitte die Leitweg-ID eintragen.');
+    const f = [b.name, b.ansprechpartner || null, b.email || null, b.telefon || null, b.anschrift || null, b.plz || null, b.ort || null, b.kundennummer || null, b.leitweg_id || null, b.ust_id || null,
+      b.sammelrechnung === true || b.sammelrechnung === '1' ? 1 : 0, format, zahl(b.zahlungsziel_tage), b.rechnung_email || null];
+    if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=?, sammelrechnung=?, rechnungsformat=?, zahlungsziel_tage=?, rechnung_email=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
+    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id, sammelrechnung, rechnungsformat, zahlungsziel_tage, rechnung_email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
   }
   if (p === '/api/konten' && req.method === 'GET') return json(res, 200, db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id ORDER BY b.rolle, b.name').all());
   if (p === '/api/konto' && req.method === 'POST') {
@@ -545,7 +561,7 @@ function fotoErlaubt(ich, datei) {
   return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id);
 }
 
-const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/drucken/rechnung': 'drucken-rechnung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
+const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
 
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://x'); const p = u.pathname, q = u.searchParams;
@@ -572,5 +588,10 @@ const server = http.createServer(async function (req, res) {
     if (!res.headersSent) json(res, e.code && e.code >= 400 && e.code < 600 ? e.code : 500, { fehler: e.message }); else res.end();
   }
 });
-if (require.main === module) server.listen(PORT, HOST, function () { console.log('Glanzwerk läuft: http://' + HOST + ':' + PORT + '  ·  App /app  ·  Kunde /kunde'); });
+// Automatischer Abrechnungslauf: prüft alle 30 Minuten, ob der eingestellte Tag erreicht ist (einmal je Monat, Vormonat)
+function automatik() { try { const l = AB.autoLauf(db); if (l) console.log('Abrechnungslauf ' + l.monat + ': ' + l.angelegt.length + ' angelegt, ' + l.gestellt.length + ' gestellt, ' + l.uebersprungen.length + ' übersprungen'); } catch (e) { console.error('Abrechnungslauf fehlgeschlagen:', e.message); } }
+if (require.main === module) {
+  server.listen(PORT, HOST, function () { console.log('Glanzwerk läuft: http://' + HOST + ':' + PORT + '  ·  App /app  ·  Kunde /kunde'); });
+  automatik(); setInterval(automatik, 30 * 60000).unref();
+}
 module.exports = { server, db };

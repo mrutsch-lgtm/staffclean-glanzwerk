@@ -175,6 +175,47 @@ test('Abrechnung: Preisbausteine, Abruf-Auftrag aus dem Portal, Entwurf, Pflicht
   assert.strictEqual((await rufen('kunde', '/api/rechnung/entwuerfe', { monat: monat })).status, 403);
 });
 
+test('Abrechnung wie SecPlan: Stunden aus der Zeiterfassung, Sammelrechnung, Lauf mit Stellen, Automatik, PDF mit ZUGFeRD', async function () {
+  const { db } = require('../server'); const AB = require('../lib/abrechnung');
+  const kid = (await rufen('buero', '/api/kunde', { name: 'Sammelkunde GmbH', anschrift: 'Hauptstraße 9', plz: '24534', ort: 'Neumünster', sammelrechnung: true, rechnungsformat: 'zugferd', zahlungsziel_tage: 30, kundennummer: 'K-2001' })).j.id;
+  assert.strictEqual((await rufen('buero', '/api/kunde', { id: kid, name: 'Sammelkunde GmbH', rechnungsformat: 'xrechnung' })).status, 400);   // XRechnung nur mit Leitweg-ID
+  const o1 = (await rufen('buero', '/api/objekt', { name: 'Haus A', kunde_id: kid, strasse: 'Weg 1', plz: '24534', ort: 'Neumünster' })).j.id;
+  assert.strictEqual((await rufen('buero', '/api/objekt', { name: 'Haus B', kunde_id: kid, abrechnungsart: 'stunden' })).status, 400);        // ohne Stundensatz
+  const o2 = (await rufen('buero', '/api/objekt', { name: 'Haus B', kunde_id: kid, strasse: 'Weg 2', plz: '24534', ort: 'Neumünster', abrechnungsart: 'stunden', stundensatz: 32 })).j.id;
+  await rufen('buero', '/api/objekt/preis', { id: o1, monatspreis: 200 });
+  const ma = (await rufen('buero', '/api/mitarbeiter')).j[0].id;
+  db.prepare("INSERT INTO zeitbuchung (mitarbeiter_id, objekt_id, kommen, gehen, pause_min) VALUES (?,?,?,?,?), (?,?,?,?,?)").run(ma, o2, '2025-10-06 06:00:00', '2025-10-06 09:00:00', 0, ma, o2, '2025-10-13 06:00:00', '2025-10-13 08:30:00', 0);
+  // Lauf Oktober mit Stellen: eine Sammelrechnung, zwei Gruppen, 200 + 5,5 Std. × 32 = 376 netto
+  const lauf = (await rufen('buero', '/api/rechnung/lauf', { monat: '2025-10', stellen: true })).j;
+  const meine = lauf.gestellt.filter(g => /Sammelkunde/.test(g.objekt)); assert.strictEqual(meine.length, 1, JSON.stringify(lauf));
+  const r = (await rufen('buero', '/api/rechnung?id=' + meine[0].id)).j;
+  assert.strictEqual(r.objekt_id, null); assert.strictEqual(r.netto, 376); assert.deepStrictEqual([...new Set(r.positionen.map(p => p.gruppe.split(' – ')[0]))], ['Haus A', 'Haus B']);
+  assert.strictEqual(r.positionen.find(p => p.einheit === 'Std.').menge, 5.5);
+  assert.strictEqual(r.zahlungsziel_tage, 30);
+  // kein zweites Mal: weder Sammel- noch Einzelrechnung für dieselben Objekte
+  assert.strictEqual((await rufen('buero', '/api/rechnung/entwurf', { objekt_id: o1, monat: '2025-10' })).status, 400);
+  assert.ok((await rufen('buero', '/api/rechnung/lauf', { monat: '2025-10' })).j.uebersprungen.some(u => /Sammelkunde/.test(u.objekt)));
+  // PDF: gestellt → ZUGFeRD eingebettet, PDF/A-Merkmale; Kunde darf nur eigene
+  const pdf = await fetch(BASIS + '/api/rechnung/pdf?id=' + r.id, { headers: { Cookie: keks.buero } }); const buf = Buffer.from(await pdf.arrayBuffer());
+  assert.strictEqual(pdf.headers.get('content-type'), 'application/pdf'); assert.strictEqual(buf.slice(0, 5).toString(), '%PDF-');
+  assert.ok(buf.includes('factur-x.xml') && buf.includes('pdfaid:part') && buf.includes('GTS_PDFA1') && buf.includes('/AFRelationship /Alternative'));
+  const { PDFDocument } = require('pdf-lib'); assert.ok((await PDFDocument.load(buf)).getPageCount() >= 1);
+  const ZF = require('../lib/zugferd'); const x = ZF.xml(db, AB.voll(db, r.id));
+  assert.match(x, /<ram:GrandTotalAmount>447\.44<\/ram:GrandTotalAmount>/); assert.match(x, /urn:cen\.eu:en16931:2017/); assert.match(x, /<ram:BilledQuantity unitCode="HUR">5\.5</);
+  assert.strictEqual((await rufen('kunde', '/api/kunde/rechnung-pdf?id=' + r.id)).status, 404);   // fremder Kunde
+  // Automatik: erst ab dem eingestellten Tag, genau einmal je Monat
+  await rufen('buero', '/api/einstellungen', { auto_lauf_aktiv: '1', auto_lauf_tag: '3', auto_stellen: '0' });
+  db.prepare("INSERT INTO zeitbuchung (mitarbeiter_id, objekt_id, kommen, gehen, pause_min) VALUES (?,?,?,?,0)").run(ma, o2, '2025-11-03 06:00:00', '2025-11-03 07:00:00');
+  assert.strictEqual(AB.autoLauf(db, '2025-12-02'), null);
+  const auto = AB.autoLauf(db, '2025-12-03'); assert.strictEqual(auto.monat, '2025-11'); assert.ok(auto.angelegt.some(a => /Sammelkunde/.test(a.objekt))); assert.strictEqual(auto.gestellt.length, 0);
+  assert.strictEqual(AB.autoLauf(db, '2025-12-20'), null);
+  const laeufe = (await rufen('buero', '/api/abrechnungslaeufe')).j; assert.ok(laeufe.some(l => l.art === 'auto' && l.monat === '2025-11'));
+  const ent = auto.angelegt.find(a => /Sammelkunde/.test(a.objekt)).id;
+  const ep = Buffer.from(await (await fetch(BASIS + '/api/rechnung/pdf?id=' + ent, { headers: { Cookie: keks.buero } })).arrayBuffer());
+  assert.ok(!ep.includes('factur-x.xml'), 'Entwurf ohne ZUGFeRD-Daten');
+  await rufen('buero', '/api/einstellungen', { auto_lauf_aktiv: '0' });
+});
+
 test('Fotos nur für Berechtigte, Abmelden beendet die Sitzung', async function () {
   const t = (await rufen('buero', '/api/tag?datum=' + heute + '&objekt=' + objektId)).j;
   const foto = [].concat(...t.objekte[0].raeume.map(r => r.aufgaben)).find(a => a.erledigt && a.erledigt.foto).erledigt.foto;

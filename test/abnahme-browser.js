@@ -66,6 +66,16 @@ async function wettbewerberDatei() {   // Aufbau „Nr | Räume | Belag | m²", 
   ws.getRow(11).values = [null, 'j2 = 2x jährlich'];
   const f = path.join(DATEN, 'lv-wettbewerber.xlsx'); await wb.xlsx.writeFile(f); return f;
 }
+// Rechnungs-PDF laden und prüfen: Seiten zählen, eingebettete ZUGFeRD-XML herauslösen (null beim Entwurf)
+async function pdfPruefen(seite, url, speichernAls) {
+  const { PDFDocument, PDFName, PDFRawStream } = require('pdf-lib');
+  const antwort = await seite.request.get(URL0 + url); const buf = await antwort.body();
+  if (antwort.headers()['content-type'] !== 'application/pdf' || buf.slice(0, 5).toString() !== '%PDF-') throw new Error('kein PDF unter ' + url + ': ' + antwort.status());
+  const doc = await PDFDocument.load(buf); let xml = null;
+  doc.context.enumerateIndirectObjects().forEach(function ([, o]) { if (o instanceof PDFRawStream && String(o.dict.get(PDFName.of('Type'))) === '/EmbeddedFile') xml = require('zlib').inflateSync(Buffer.from(o.contents)).toString('utf8'); });
+  if (speichernAls) fs.writeFileSync(path.join(BILDER, speichernAls), buf);
+  return { buf: buf, seiten: doc.getPageCount(), xml: xml, pdfa: buf.includes('pdfaid:part') && buf.includes('GTS_PDFA1') };
+}
 function pngDatei() { const f = path.join(DATEN, 'foto.png'); fs.writeFileSync(f, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAHUlEQVR4nGNkaGBgIAUwkaR6VMOohlENoxqGkgYAO8wBEYy2l4cAAAAASUVORK5CYII=', 'base64')); return f; }
 
 async function buero1(b) {
@@ -297,16 +307,17 @@ async function abrechnen(b) {
   for (const [n, v] of [['firma_strasse', 'Prüfstraße 2'], ['firma_plz', '24534'], ['firma_ort', 'Neumünster'], ['firma_email', 'rechnung@abnahme.test'], ['steuernummer', '00/000/00000'], ['iban', 'DE02 1203 0000 0000 2020 51'], ['bank', 'Abnahmebank'], ['geschaeftsfuehrung', 'Test Geschäftsführung']]) await s.fill('[name=' + n + ']', v);
   await klick(s, '#eSpeichern', 'Rechnungsangaben speichern'); await meldungIst(s, /gespeichert/, 'Firmenangaben gespeichert');
   await klick(s, '#nav a[data-v=kunden]', 'Kunden'); await s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' }).locator('[data-kunde]').click();
-  await schublade(s, { anschrift: 'Kundenweg 5', plz: '24103', kundennummer: 'K-1001', leitweg_id: '' }); await meldungIst(s, /Gespeichert/, 'Kundenanschrift + Kundennummer');
+  await schublade(s, { anschrift: 'Kundenweg 5', plz: '24103', kundennummer: 'K-1001', leitweg_id: '', rechnungsformat: 'zugferd', zahlungsziel_tage: '21' }); await meldungIst(s, /Gespeichert/, 'Kundenanschrift + Kundennummer');
   await s.goto(rurl); await ruhig(s); if (/Pflichtangaben/.test(await s.textContent('#inhalt'))) throw new Error('Pflichtangaben-Warnung bleibt'); ok('Pflichtangaben vollständig');
-  const [vorschau] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/rechnung"]')]); await beobachten(vorschau, 'Vorschau'); await ruhig(vorschau);
-  if (await vorschau.locator('#entwurf').isHidden()) throw new Error('Entwurf ohne ENTWURF-Stempel'); ok('Vorschau trägt „ENTWURF"'); await vorschau.close();
+  const vorschau = await pdfPruefen(s, await s.getAttribute('#rePdf', 'href'), 'b23b-rechnung-entwurf.pdf');
+  if (vorschau.xml) throw new Error('Entwurf enthält schon ZUGFeRD-Daten'); ok('PDF-Vorschau des Entwurfs (' + vorschau.seiten + ' Seite/n), ohne ZUGFeRD-Daten');
   await klick(s, '#reStellen', 'Rechnung stellen'); await meldungIst(s, /Gestellt: RE-\d{4}-0001/, 'Rechnung gestellt');
   if (await s.locator('#rePos').count()) throw new Error('Gestellte Rechnung noch änderbar'); ok('gestellte Rechnung ohne Bearbeiten-Knöpfe');
-  const [druck] = await Promise.all([ctx.waitForEvent('page'), s.click('a[href^="/drucken/rechnung"]')]); await beobachten(druck, 'Rechnungsdruck'); await ruhig(druck);
-  const dt = await druck.textContent('body');
-  for (const muss of ['RE-', 'Kundenweg 5', 'Prüfstraße 2', 'Steuernummer: 00/000/00000', 'IBAN: DE02', 'Leistungszeitraum', 'Umsatzsteuer', 'Rechnungsbetrag', 'K-1001']) if (!dt.includes(muss)) throw new Error('Rechnung ohne Pflichtangabe „' + muss + '"');
-  if (/Lohnnebenkosten|Gemeinkosten|Gewinn|Verrechnungssatz/.test(dt)) throw new Error('Interne Kalkulationswerte auf der Rechnung'); ok('Rechnungsdruck: alle Pflichtangaben, keine internen Werte'); await bild(druck, 'b24-rechnung-druck'); await druck.close();
+  const pr = await pdfPruefen(s, await s.getAttribute('#rePdf', 'href'), 'b24-rechnung.pdf');
+  if (!pr.xml || !pr.pdfa) throw new Error('Gestellte Rechnung ohne ZUGFeRD/PDF-A-Merkmale');
+  for (const muss of ['<ram:ID>RE-', 'Kundenweg 5', 'Prüfstraße 2', 'schemeID="FC">00/000/00000', 'DE02120300000000202051', 'BillingSpecifiedPeriod', '<ram:BuyerReference>K-1001', '<ram:GrandTotalAmount>', '<ram:DueDateDateTime><udt:DateTimeString format="102">' + plus(21).replace(/-/g, '')]) if (!pr.xml.includes(muss)) throw new Error('ZUGFeRD ohne „' + muss + '"');
+  if (/Lohnnebenkosten|Gemeinkosten|Gewinn|Verrechnungssatz/.test(pr.xml)) throw new Error('Interne Kalkulationswerte in der Rechnung'); ok('PDF (' + pr.seiten + ' Seite/n) mit eingebetteter ZUGFeRD-XML: alle Pflichtangaben, keine internen Werte');
+  const [pl] = await Promise.all([s.waitForEvent('download'), s.click('#rePdfLaden')]); if (!/^Rechnung_RE-\d{4}-0001\.pdf$/.test(pl.suggestedFilename())) throw new Error('PDF-Dateiname ' + pl.suggestedFilename()); ok('PDF herunterladen: ' + pl.suggestedFilename());
   const [xml] = await Promise.all([s.waitForEvent('download'), s.click('a[href^="/api/rechnung/xrechnung"]')]); const xp = path.join(DATEN, 'x.xml'); await xml.saveAs(xp); const xt = fs.readFileSync(xp, 'utf8');
   if (!/xrechnung_3\.0/.test(xt) || !/<cbc:BuyerReference>K-1001</.test(xt) || !/<cbc:PayableAmount currencyID="EUR">\d+\.\d\d</.test(xt)) throw new Error('XRechnung unvollständig'); ok('XRechnung heruntergeladen (' + xml.suggestedFilename() + ')');
   await klick(s, '#reBezahlt', 'Als bezahlt markieren'); await meldungIst(s, /bezahlt/, 'bezahlt'); await klick(s, '#reOffen', 'Wieder offen'); await meldungIst(s, /Wieder offen/, 'wieder offen');
@@ -314,10 +325,9 @@ async function abrechnen(b) {
   await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); const lt = await s.textContent('#inhalt');
   if (!/storniert/.test(lt) || !/Storno/.test(lt)) throw new Error('Liste zeigt Storno nicht'); ok('Liste: Original storniert + Stornorechnung');
   // Nach dem Storno sind die Sonderleistungen wieder abrechenbar → neuer Entwurf, stellen
-  await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erneut erzeugen'); await meldungIst(s, /Entwürfe angelegt/, 'neuer Entwurf'); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen');
-  await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
-  if (!/Grundreinigung Flur/.test(await s.textContent('#inhalt'))) throw new Error('Sonderleistung nach Storno nicht wieder abrechenbar'); ok('nach Storno: Sonderleistung wieder im Entwurf');
-  await klick(s, '#reStellen', 'Korrigierte Rechnung stellen'); await meldungIst(s, /Gestellt: RE-\d{4}-0003/, 'Rechnung RE-…-0003 gestellt');
+  await s.fill('#abMonat', plus(0).slice(0, 7)); await s.check('#abStellen'); await klick(s, '#abErzeugen', 'Abrechnungslauf mit „gleich stellen"'); await meldungIst(s, /Entwürfe angelegt, 1 gestellt/, 'Lauf legt an und stellt'); if (await s.locator('#schublade').isVisible()) await s.click('#schublade #abbrechen');
+  await s.locator('tr[data-re]', { hasText: 'RE-' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).filter({ hasText: '0003' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
+  if (!/Grundreinigung Flur/.test(await s.textContent('#inhalt'))) throw new Error('Sonderleistung nach Storno nicht wieder abgerechnet'); ok('nach Storno: Sonderleistung in RE-…-0003, direkt gestellt');
   // Entwurf löschen: Entwurf für den Vormonat anlegen und wieder verwerfen
   await klick(s, 'a[href="#abrechnung"]', 'Alle Rechnungen'); await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen');
   const vm = new Date(); vm.setDate(1); vm.setMonth(vm.getMonth() - 1); await s.fill('#abMonat', vm.toISOString().slice(0, 7));
@@ -325,13 +335,23 @@ async function abrechnen(b) {
   await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   await klick(s, '#reLoeschen', 'Entwurf löschen'); await meldungIst(s, /Entwurf gelöscht/, 'Entwurf gelöscht'); await s.waitForURL(/#abrechnung$/);
   if (await s.locator('tr[data-re]', { hasText: 'Entwurf' }).filter({ hasText: 'Abnahme-Objekt Kiel' }).count()) throw new Error('Entwurf noch in der Liste'); ok('Entwurf ist aus der Liste verschwunden, Nummernkreis unberührt');
+  // Automatik einstellen, Protokoll der Läufe ansehen
+  await klick(s, '[data-reiter=automatik]', 'Reiter Automatik');
+  await s.selectOption('[name=auto_lauf_aktiv]', '1'); await s.fill('[name=auto_lauf_tag]', '40'); await klick(s, '#autoSpeichern', 'Tag 40 (ungültig)'); await meldungIst(s, /zwischen 1 und 28/, 'ungültiger Tag abgelehnt');
+  await s.fill('[name=auto_lauf_tag]', '3'); await s.selectOption('[name=auto_stellen]', '1'); await klick(s, '#autoSpeichern', 'Automatik an, Tag 3, gleich stellen'); await meldungIst(s, /Automatik gespeichert/, 'Automatik gespeichert');
+  if (await s.inputValue('[name=auto_lauf_tag]') !== '3' || await s.inputValue('[name=auto_lauf_aktiv]') !== '1') throw new Error('Automatik nicht gespeichert'); ok('Einstellung bleibt nach dem Neuladen');
+  const laeufe = await s.locator('[data-lauf]').count(); if (laeufe < 3) throw new Error('Protokoll zeigt nur ' + laeufe + ' Läufe'); ok(laeufe + ' Läufe im Protokoll');
+  await s.locator('[data-lauf]').first().click(); await s.locator('#schublade').waitFor({ state: 'visible' });
+  if (!/Abrechnungslauf/.test(await s.textContent('#schublade'))) throw new Error('Laufdetails fehlen'); ok('Laufdetails: angelegt / gestellt / offen'); await bild(s, 'b26-automatik'); await s.click('#schublade #abbrechen');
+  await s.selectOption('[name=auto_lauf_aktiv]', '0'); await klick(s, '#autoSpeichern', 'Automatik wieder aus'); await meldungIst(s, /Automatik gespeichert/, 'Automatik aus');
   await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/);
   // Kunde sieht Rechnungen, kann ansehen und XRechnung laden
   await s.fill('[name=email]', 'kunde@abnahme.test'); await s.fill('[name=passwort]', 'Kunde-Abnahme-1'); await s.click('#los'); await s.waitForURL(/\/kunde/); await ruhig(s);
   await klick(s, '#nav a[data-v=rechnungen]', 'Kunde: Rechnungen'); const kt = await s.textContent('#inhalt');
   if (!/0001/.test(kt) || !/0002/.test(kt) || !/0003/.test(kt)) throw new Error('Kunde sieht nicht alle drei Belege'); ok('Kunde sieht Rechnung, Storno und neue Rechnung'); await bild(s, 'k04-rechnungen');
-  const [kd] = await Promise.all([ctx.waitForEvent('page'), s.locator('tr', { hasText: '0003' }).locator('a[href^="/drucken/rechnung"]').click()]); await beobachten(kd, 'Kunde-Rechnung'); await ruhig(kd);
-  const kdt = await kd.textContent('body'); if (!/Rechnungsbetrag/.test(kdt) || !/Prüfstraße 2/.test(kdt)) throw new Error('Kunde: Rechnung lädt nicht'); ok('Kunde öffnet die Rechnung'); await kd.close();
+  const kp = await pdfPruefen(s, await s.locator('tr', { hasText: '0003' }).locator('a[href^="/api/kunde/rechnung-pdf"]').getAttribute('href'));
+  if (!kp.xml || !/Prüfstraße 2/.test(kp.xml)) throw new Error('Kunde: Rechnungs-PDF unvollständig'); ok('Kunde öffnet das Rechnungs-PDF mit ZUGFeRD-Daten');
+  const fremd = await s.request.get(URL0 + '/api/rechnung/pdf?id=1'); if (fremd.status() !== 403) throw new Error('Kunde erreicht Büro-PDF: ' + fremd.status()); ok('Kunde kommt nicht an die Büro-PDF-Schnittstelle (403)');
   const [kx] = await Promise.all([s.waitForEvent('download'), s.locator('tr', { hasText: '0003' }).locator('a[href^="/api/kunde/xrechnung"]').click()]); ok('Kunde lädt XRechnung: ' + kx.suggestedFilename());
   const firma = await s.request.get(URL0 + '/api/kunde/firma'); const fj = await firma.json(); if ('gewinn_prozent' in fj || 'lohnnebenkosten_prozent' in fj) throw new Error('Kunde sieht Kalkulationswerte'); ok('Kunde sieht keine Kalkulationswerte');
   await klick(s, '#nav a[data-v=uebersicht]', 'Meine Objekte'); await s.locator('[data-o]').first().click(); await ruhig(s);
