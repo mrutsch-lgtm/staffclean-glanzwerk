@@ -255,7 +255,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 @media (min-width: 721px) {
   .kopf .innen { gap: 1.2rem; }
   .nav { gap: 0; }
-  .nav a { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; }
+  .nav .unter a { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; }
 }
 
 /* ---------- Kommunikation unten rechts (Büro und App) */
@@ -339,7 +339,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 .nav .unter a.aktiv::after { display: none; }
 .nav .unter a.aktiv { background: rgba(52, 211, 153, .12); }
 .nav-knopf { display: none; margin-left: auto; background: none; border: 1px solid rgba(255,255,255,.2); color: #fff; border-radius: 10px; font-size: 1.3rem; padding: .25rem .7rem; cursor: pointer; }
-@media (max-width: 1180px) { .nav .menue > button { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; } .kopf .innen { gap: 1rem; } }
+@media (max-width: 1180px) { .nav > a, .nav .menue > button { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; } .kopf .innen { gap: 1rem; } }
 @media (max-width: 900px) {
   .kopf .innen { flex-wrap: wrap; }
   .nav-knopf { display: block; }
@@ -415,3 +415,7 @@ body:has(.app-fuss:not([hidden])) .komm-panel { bottom: 10.4rem; height: calc(10
 @media (max-width: 600px) { .reg-zeile { grid-template-columns: 1fr 1fr; } .reg-zeile .reg-weg { grid-column: 1 / -1; } }
 /* Handy: lange deutsche Komposita („Gefährdungsbeurteilungen") passen in die Überschrift, ohne mitten im Wort zu brechen */
 @media (max-width: 600px) { h1 { font-size: 1.6rem; } }
+/* Glanzwerk-Logo in der oberen Leiste statt Schriftzug */
+.leiste .ausblenden { display: inline-flex; align-items: center; gap: .45rem; }
+.leiste-logo { height: 18px; width: auto; display: block; }
+@media (max-width: 720px) { .leiste .ausblenden { display: none; } }
