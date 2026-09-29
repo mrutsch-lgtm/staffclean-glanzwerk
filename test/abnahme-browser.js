@@ -26,7 +26,7 @@ async function beobachten(seite, name) {
   seite.on('pageerror', e => fehler.push(name + ' JS: ' + e.message));
   seite.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) fehler.push(name + ' Konsole: ' + m.text()); });
   seite.on('response', r => { const u = r.url(); if (!u.includes('/api/') || r.status() < 400) return; if (u.endsWith('/api/ich') && r.status() === 401) return; if (erlaubt > 0) { erlaubt--; return; } fehler.push(name + ' API ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(URL0, '')); });
-  seite.on('dialog', d => d.accept(d.type() === 'prompt' ? 'Abnahme-Bemerkung' : undefined));
+  seite.on('dialog', d => d.accept(d.type() === 'prompt' ? (/JJJJ-MM/.test(d.message()) ? d.defaultValue() : 'Abnahme-Bemerkung') : undefined));   // Monatsabfrage: Vorschlag übernehmen
 }
 async function bild(seite, n) { if (process.env.OHNE_BILDER) return; await seite.waitForTimeout(350); await seite.screenshot({ path: path.join(BILDER, n + '.png'), fullPage: true }); }
 async function ruhig(seite) { await seite.waitForLoadState('networkidle').catch(() => {}); await seite.waitForTimeout(250); }
@@ -599,13 +599,90 @@ async function stufe3(b) {
   for (const r of kat) { await s.goto(URL0 + '/#report/' + r.id); await s.locator('#repTabelle table, #repTabelle .leer').first().waitFor({ timeout: 15000 }); }
   ok('alle ' + kat.length + ' Reports in der Oberfläche geladen');
   await s.goto(URL0 + '/#report/planungen'); await s.locator('#repTabelle').waitFor(); await s.selectOption('#repSchnell', 'jahr'); await s.locator('#repTabelle table').waitFor(); ok('Schnellwahl „dieses Jahr"'); await bild(s, 'b37-report-planungen');
-  await navKlick(s, 'controlling', 'Controlling'); const [gb] = await Promise.all([s.waitForEvent('popup'), s.click('#cBericht')]); await gb.waitForLoadState(); ok('Bericht Geschäftsführung geöffnet: ' + gb.url().replace(URL0, '')); await gb.close();
+  await navKlick(s, 'controlling', 'Controlling'); const [gb] = await Promise.all([s.waitForEvent('popup'), s.click('#cBericht')]); const vm = new Date(); vm.setDate(1); vm.setMonth(vm.getMonth() - 1); const gbu = URL0 + '/api/bericht/geschaeftsfuehrung?monat=' + vm.getFullYear() + '-' + String(vm.getMonth() + 1).padStart(2, '0'); const gbr = await s.request.get(gbu); if (gbr.status() !== 200 || (await gbr.body()).slice(0, 4).toString() !== '%PDF') throw new Error('Bericht Geschäftsführung kein PDF: ' + gbu); ok('Bericht Geschäftsführung (Vormonat) als PDF'); await gb.close();
   // Handy: Menü hinter ☰, Gruppen klappen auf
   await s.setViewportSize({ width: 390, height: 844 }); await ruhig(s);
   if (await s.locator('#nav').isVisible()) throw new Error('Menü am Handy nicht eingeklappt');
   const breit = await s.evaluate(() => Math.max(document.querySelector('.leiste .innen').scrollWidth, document.querySelector('.kopf .innen').scrollWidth) - window.innerWidth);
   if (breit > 1) throw new Error('Kopf am Handy ' + breit + ' px breiter als der Bildschirm'); ok('Handy: Kopf passt in die Breite'); await klick(s, '#navKnopf', 'Handy: Menü öffnen');
   await navKlick(s, 'kunden', 'Handy: Kunden & Finanzen → Kunden'); if (await s.locator('#nav').isVisible()) throw new Error('Menü schließt nach der Wahl nicht'); ok('Handy: Menü schließt nach der Wahl'); await bild(s, 'b35-menue-handy');
+  await ctx.close();
+}
+
+// Stufe 4: Arbeitsschutz & QM — Register, Dateien, Tabellenzeilen, Unterweisungen, Dienstanweisung, Personalakte, Quittung in der App
+// PDF-Link: Ziel im Browser holen (ein PDF-Popup lädt im kopflosen Chrome nie fertig) und auf %PDF prüfen
+async function pdfDa(s, link, text) { const href = await link.first().getAttribute('href'); const r = await s.request.get(URL0 + href); const buf = await r.body(); if (r.status() !== 200 || buf.slice(0, 4).toString() !== '%PDF') throw new Error(text + ': kein PDF (' + r.status() + ')'); ok(text + ' (' + Math.round(buf.length / 1024) + ' KB)'); }
+async function stufe4(b) {
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Stufe 4');
+  await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
+  const mitten = await s.$$eval('#nav > a, #nav > .menue', l => l.map(e => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }));
+  if (Math.max.apply(null, mitten) - Math.min.apply(null, mitten) > 10) throw new Error('Menü mit Verwaltung läuft über mehrere Zeilen'); ok('Menü mit Verwaltung weiter in einer Reihe');
+  await navKlick(s, 'sicherheit', 'Verwaltung → Arbeitsschutz & QM'); await textDa(s, '#inhalt', /Wiedervorlage/, 'Übersicht Arbeitsschutz');
+  if (await s.locator('[data-register]').count() !== 14) throw new Error('nicht 14 Register in der Übersicht'); ok('14 Register in der Übersicht');
+  // Gefahrstoff mit Symbolen, Sicherheitsdatenblatt, Betriebsanweisung (PDF), CSV
+  await navKlick(s, 'register-gefahrstoffe', 'Verwaltung → Gefahrstoffe'); await klick(s, '#regNeu2', '+ Ersten Eintrag anlegen');
+  const sch = s.locator('#schublade');
+  await sch.locator('[name=produkt]').fill('Sanitärreiniger sauer'); await sch.locator('[data-mehr=ghs][value=GHS05]').check(); await sch.locator('[data-mehr=ghs][value=GHS07]').check(); await sch.locator('[name=signalwort]').selectOption('Gefahr');
+  await sch.locator('[name=sdb_pruefen]').fill(plus(10)); await sch.locator('[name=betriebsanweisung]').fill('Nie mit chlorhaltigen Mitteln mischen. Handschuhe und Schutzbrille tragen.');
+  await klick(s, '#speichern', 'Gefahrstoff anlegen'); await meldungIst(s, /Angelegt/, 'Gefahrstoff angelegt');
+  await sch.locator('h2', { hasText: 'Nr.' }).waitFor(); ok('Eintrag öffnet sich zum Weiterbearbeiten');
+  const sdb = path.join(DATEN, 'sdb.pdf'); fs.writeFileSync(sdb, '%PDF-1.4\n%Sicherheitsdatenblatt\n');
+  await sch.locator('[data-datei=sdb]').setInputFiles(sdb); await meldungIst(s, /Datei hochgeladen/, 'Sicherheitsdatenblatt hochgeladen');
+  await sch.locator('a', { hasText: 'ansehen' }).waitFor(); ok('Sicherheitsdatenblatt verlinkt');
+  await pdfDa(s, sch.locator('a[href^="/api/register.pdf"]'), 'Betriebsanweisung als PDF');
+  await klick(s, '#abbrechen', 'Schublade schließen');
+  await s.locator('[data-eintrag]', { hasText: 'Sanitärreiniger sauer' }).click(); await sch.waitFor({ state: 'visible' }); await sch.locator('[name=lagerort]').fill('Lager Neumünster, Regal 2'); await klick(s, '#speichern', 'Gefahrstoff speichern'); await meldungIst(s, /Gespeichert/, 'Gefahrstoff geändert');
+  const [gc] = await Promise.all([s.waitForEvent('download'), s.click('a[href^="/api/register.csv"]')]); ok('Gefahrstoffverzeichnis als CSV: ' + gc.suggestedFilename());
+  await s.fill('#regSuche', 'gibt-es-nicht'); await ruhig(s); if (await s.locator('[data-eintrag]').count()) throw new Error('Suche filtert nicht'); await s.fill('#regSuche', ''); await ruhig(s); ok('Suche im Register'); await bild(s, 'b40-gefahrstoffe');
+  // Gefährdungsbeurteilung mit Tabellenzeilen
+  await s.goto(URL0 + '/#register/gbu'); await ruhig(s); await klick(s, '#regNeu', '+ Gefährdungsbeurteilung');
+  await sch.locator('[name=titel]').fill('Unterhaltsreinigung Praxis'); await sch.locator('[name=objekt_id]').selectOption({ label: 'Abnahme-Objekt Kiel' });
+  const z1 = sch.locator('[data-tabelle=gefaehrdungen] .reg-zeile').first(); await z1.locator('[name=_gefaehrdung]').fill('Rutschgefahr nasser Boden'); await z1.locator('[name=_schwere]').fill('2'); await z1.locator('[name=_massnahme]').fill('Warnschild, rutschfeste Schuhe'); await z1.locator('[name=_frist]').fill(plus(5));
+  await klick(s, '[data-zeileplus=gefaehrdungen]', '+ Zeile'); if (await sch.locator('[data-tabelle=gefaehrdungen] .reg-zeile').count() !== 2) throw new Error('Zeile nicht angefügt'); ok('Tabellenzeile angefügt');
+  await sch.locator('.reg-weg').last().click(); if (await sch.locator('[data-tabelle=gefaehrdungen] .reg-zeile').count() !== 1) throw new Error('Zeile nicht entfernt'); ok('Tabellenzeile entfernt');
+  await klick(s, '#speichern', 'Gefährdungsbeurteilung anlegen'); await meldungIst(s, /Angelegt/, 'Gefährdungsbeurteilung angelegt');
+  await sch.locator('h2', { hasText: 'Nr.' }).waitFor(); if (await sch.locator('[name=_gefaehrdung]').first().inputValue() !== 'Rutschgefahr nasser Boden') throw new Error('Tabellenzeile nicht gespeichert'); ok('Tabellenzeile gespeichert');
+  await klick(s, '#regLoeschen', 'Gefährdungsbeurteilung löschen'); await meldungIst(s, /Gelöscht/, 'Eintrag gelöscht');
+  // Ausgabe Schlüssel an Anna (Quittung folgt in der App)
+  await navKlick(s, 'register-ausgaben', 'Verwaltung → Kleidung, Schlüssel, Geräte'); await klick(s, '#regNeu2', '+ Ausgabe');
+  await sch.locator('[name=art]').selectOption('schluessel'); await sch.locator('[name=gegenstand]').fill('Generalschlüssel'); await sch.locator('[name=merkmal]').fill('Nr. 7'); await sch.locator('[name=mitarbeiter_id]').selectOption({ label: 'Anna Beispiel' }); await sch.locator('[name=objekt_id]').selectOption({ label: 'Abnahme-Objekt Kiel' }); await sch.locator('[name=ausgabe]').fill(plus(0));
+  await klick(s, '#speichern', 'Ausgabe anlegen'); await meldungIst(s, /Angelegt/, 'Schlüsselausgabe eingetragen'); await sch.locator('h2', { hasText: 'Nr.' }).waitFor(); await klick(s, '#abbrechen', 'Schublade zu');
+  // Unterweisungen
+  await navKlick(s, 'unterweisung', 'Verwaltung → Unterweisungen'); if (await s.locator('[data-thema]').count() < 6) throw new Error('Vorlagen fehlen'); ok('6 Unterweisungs-Vorlagen');
+  await klick(s, '[data-reiter=faellig]', 'Reiter Fällig'); await klick(s, '[data-reiter=themen]', 'Reiter Themen');
+  await klick(s, '#uwNeu', '+ Unterweisung'); await schublade(s, { titel: 'Scheuersaugmaschine', inhalt: 'Nur nach Einweisung benutzen. Kabel nicht überfahren.', intervall_monate: '12' }); await meldungIst(s, /Gespeichert/, 'Unterweisung angelegt');
+  await s.waitForURL(/#unterweisung\/\d+/); await s.locator('#uwBearbeiten').waitFor(); await ruhig(s);
+  await klick(s, '#uwBearbeiten', 'Unterweisung bearbeiten'); await schublade(s, { inhalt: 'Nur nach Einweisung benutzen. Kabel nicht überfahren. Akku nur im Lager laden.' }); await meldungIst(s, /Neue Fassung 2/, 'Inhalt geändert → Fassung 2');
+  await klick(s, '#uwPraesenz', 'Präsenz eintragen'); await s.locator('[data-tn]').first().check(); await schublade(s, { durch: 'Objektleitung' }); await meldungIst(s, /Teilnehmer eingetragen/, 'Präsenzunterweisung eingetragen');
+  await pdfDa(s, s.locator('a[href^="/api/unterweisung.pdf"]'), 'Unterweisungsnachweis als PDF'); await bild(s, 'b41-unterweisung');
+  await klick(s, '#uwArchiv', 'Unterweisung archivieren'); await meldungIst(s, /Archiviert/, 'archiviert');
+  await s.waitForURL(/#unterweisung$/); await s.locator('#daNeu').waitFor(); await ruhig(s); await klick(s, '#daNeu', '+ Dienstanweisung'); await s.selectOption('#schublade [name=objekt_id]', { label: 'Team Abnahme-Objekt Kiel' });
+  await schublade(s, { titel: 'Dienstanweisung Kiel', inhalt: 'Schlüssel liegt im Tresor. Alarmanlage nach Anweisung scharf schalten.' }); await meldungIst(s, /Gespeichert/, 'Dienstanweisung angelegt');
+  // Übersicht: Frist anklicken öffnet den Eintrag
+  await navKlick(s, 'sicherheit', 'Arbeitsschutz & QM'); await s.locator('[data-frist]').first().click(); await sch.waitFor({ state: 'visible' }); ok('Frist öffnet den Eintrag'); await klick(s, '#abbrechen', 'zu'); await bild(s, 'b42-arbeitsschutz');
+  // Personalakte: Reiter Unterweisung & Ausstattung, Eintritts-Checkliste abhaken
+  const leute = await (await s.request.get(URL0 + '/api/mitarbeiter')).json(); const anna = leute.find(m => m.name === 'Anna Beispiel');
+  await s.request.post(URL0 + '/api/register/checkliste', { data: { art: 'eintritt', mitarbeiter_id: anna.id } });
+  await s.goto(URL0 + '/#person/' + anna.id); await ruhig(s); await klick(s, '[data-reiter=schutz]', 'Reiter Unterweisung & Ausstattung'); await s.locator('[data-uw]').first().waitFor(); ok('Unterweisungen in der Akte');
+  await s.locator('[data-ausg]').first().click(); await sch.waitFor({ state: 'visible' }); ok('Ausgabe aus der Akte geöffnet'); await klick(s, '#abbrechen', 'zu');
+  await klick(s, '#paAusgabe', '+ Ausgabe aus der Akte'); await sch.waitFor({ state: 'visible' }); await klick(s, '#abbrechen', 'zu');
+  await s.locator('[data-chk]').first().click(); await sch.locator('[name=_erledigt]').first().waitFor(); await sch.locator('[name=_erledigt]').first().check(); await klick(s, '#speichern', 'Checkliste speichern'); await meldungIst(s, /Gespeichert/, 'Checklistenschritt abgehakt');
+  await s.locator('[data-uw]').first().click(); await s.waitForURL(/#unterweisung\/\d+/); ok('Sprung zur Unterweisung');
+  // App: Anna liest und bestätigt alles
+  const handy = await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }); const a = await handy.newPage(); await beobachten(a, 'App Stufe 4');
+  await a.goto(URL0 + '/app'); await ruhig(a); await a.click('.kachel:has-text("Anna")'); for (const z of ['1', '1', '1', '1', '✓']) await a.click('[data-z="' + z + '"]'); await a.locator('.app-gruss').waitFor();
+  await klick(a, '#bestaetigenListe', 'App: Bitte lesen und bestätigen'); await bild(a, 'b43-app-bestaetigen');
+  let runden = 0;
+  while (await a.locator('[data-uwi], [data-agi]').count()) {
+    if (++runden > 12) throw new Error('Bestätigen endet nicht');
+    const agi = await a.locator('[data-agi]').count(); await a.locator(agi ? '[data-agi]' : '[data-uwi]').first().click(); await a.locator('#gelesen').waitFor();
+    if (runden === 1) { await a.click('#bestaetigen'); await meldungIst(a, /Häkchen/, 'App: ohne Häkchen keine Bestätigung'); await bild(a, 'b44-app-quittung'); }
+    await a.check('#gelesen'); await a.click('#bestaetigen'); await meldungIst(a, /Bestätigt/, 'App: ' + (agi ? 'Empfang quittiert' : 'Unterweisung bestätigt')); await ruhig(a);
+  }
+  await a.locator('.app-gruss').waitFor(); if (await a.locator('#bestaetigenListe').count()) throw new Error('nach allem Bestätigen noch offen'); ok('App: alles bestätigt (' + runden + ')');
+  await handy.close();
+  await s.goto(URL0 + '/#register/ausgaben'); await ruhig(s); if (!/✓/.test(await s.locator('[data-eintrag]', { hasText: 'Generalschlüssel' }).textContent())) throw new Error('Quittung im Büro nicht sichtbar'); ok('Büro sieht die Quittung aus der App');
+  await s.goto(URL0 + '/#unterweisung'); await ruhig(s); await klick(s, '[data-reiter=faellig]', 'Fällig nach App-Bestätigung');
   await ctx.close();
 }
 
@@ -621,7 +698,7 @@ async function stufe3(b) {
   try {
     b = await chromium.launch();
     if (process.env.NUR_APP) { await app(b, true); throw new Error('NUR_APP fertig'); }
-    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b); await erweiterung(b); await stufe3(b);
+    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b); await erweiterung(b); await stufe3(b); await stufe4(b);
     await b.close(); b = null;
     if (mitWebkit) {
       const w = await webkit.launch(); const ctx = await w.newContext({ viewport: { width: 390, height: 844 } }); const s = await ctx.newPage(); await beobachten(s, 'WebKit');

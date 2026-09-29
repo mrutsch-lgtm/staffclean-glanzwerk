@@ -46,6 +46,12 @@ const CTRL = require('./lib/controlling');
 CTRL.tabellen(db);
 db.exec("CREATE TABLE IF NOT EXISTS anmeldung_log (id INTEGER PRIMARY KEY, rolle TEXT, wer_id INTEGER, name TEXT, zeit TEXT DEFAULT (datetime('now','localtime')))");
 const REP = require('./lib/reports');
+const RG = require('./lib/register');
+RG.tabellen(db);
+const UW = require('./lib/unterweisung');
+UW.tabellen(db);
+const REGDATEIEN = path.join(DB.ORDNER, 'register');   // Sicherheitsdatenblätter, Verträge, Nachweise — nur Büro
+fs.mkdirSync(REGDATEIEN, { recursive: true });
 if (process.env.STAFFCLEAN_DEMO !== '0' && DEMO.anlegen(db)) console.log('Beispieldaten angelegt.');
 
 const heute = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -177,6 +183,13 @@ async function appApi(req, res, p, q, ich) {
     return json(res, 200, uebersetzen(plan, ich.mitarbeiter.sprache));
   }
   if (p === '/api/app/ich') return json(res, 200, { name: ich.mitarbeiter.name, sprache: ich.mitarbeiter.sprache });
+  // Unterweisungen, Dienstanweisungen und Empfangsquittungen: lesen und bestätigen
+  if (p === '/api/app/bestaetigen' && req.method === 'GET') return json(res, 200, { unterweisungen: UW.offenFuer(db, mid), ausgaben: RG.offeneQuittungen(db, mid).map(function (a) { return { id: a.id, art: a.art, gegenstand: a.gegenstand, merkmal: a.merkmal, anzahl: a.anzahl, objekt: a.objekt_id_name, ausgabe: a.ausgabe }; }) });
+  if (p === '/api/app/bestaetigen' && req.method === 'POST') {
+    const b = await leib(req); if (!b.gelesen) throw new Fehler(400, 'Bitte bestätigen, dass du alles gelesen und verstanden hast.');
+    try { if (b.ausgabe) RG.quittieren(db, mid, b.ausgabe); else UW.bestaetigen(db, mid, b.thema); } catch (e) { throw new Fehler(403, e.message); }
+    return json(res, 200, { ok: true });
+  }
   if (p === '/api/app/schichten') {
     const von = heute(), bis = new Date(Date.now() + 13 * 86400000).toISOString().slice(0, 10);
     return json(res, 200, db.prepare(`SELECT s.id, s.datum, s.beginn, s.ende, s.pause_min, s.status, s.notiz, o.name objekt, o.strasse, o.ort, o.zugang FROM schicht s JOIN objekt o ON o.id = s.objekt_id
@@ -430,6 +443,7 @@ async function bueroApi(req, res, p, q, ich) {
     else id = Number(db.prepare('INSERT INTO mitarbeiter (name, telefon, sprache, minijob, lohngruppe, stundenlohn, aktiv, personalnummer, wochenstunden) VALUES (?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid);
     if (b.pin) db.prepare('UPDATE mitarbeiter SET pin = ? WHERE id = ?').run(Z.hash(String(b.pin)), id);
     if (b.aktiv === false || b.aktiv === 0) db.prepare("DELETE FROM sitzung WHERE mitarbeiter_id = ?").run(id);
+    if (!Number(b.id)) RG.checklisteAnlegen(db, 'eintritt', id, heute(), ich.name);   // neue Kraft: Eintritts-Checkliste
     return json(res, 200, { ok: true, id: id });
   }
   // --- Personalakte (wie in der Sicherheitsplanung)
@@ -452,6 +466,7 @@ async function bueroApi(req, res, p, q, ich) {
     // Anzeigename folgt Vor- und Nachname, sobald beide da sind
     const m = db.prepare('SELECT vorname, nachname FROM mitarbeiter WHERE id = ?').get(id); if (m.vorname && m.nachname) db.prepare('UPDATE mitarbeiter SET name = ? WHERE id = ?').run(m.vorname + ' ' + m.nachname, id);
     // Austritt in der Vergangenheit → gesperrt, keine App-Anmeldung mehr
+    if (w.austritt) RG.checklisteAnlegen(db, 'austritt', id, w.austritt, ich.name);   // Austritt eingetragen: Checkliste mit allem, was zurück muss
     if (w.austritt && w.austritt < heute()) { db.prepare('UPDATE mitarbeiter SET aktiv = 0 WHERE id = ?').run(id); db.prepare('DELETE FROM sitzung WHERE mitarbeiter_id = ?').run(id); }
     return json(res, 200, { ok: true, luecken: PERS.luecken(db.prepare('SELECT * FROM mitarbeiter WHERE id = ?').get(id)) });
   }
@@ -754,7 +769,7 @@ async function bueroApi(req, res, p, q, ich) {
       if (p === '/api/bewerber') return json(res, 200, { ok: true, id: BW.speichern(db, b, ich.name) });
       if (p === '/api/bewerber/status') { BW.statusSetzen(db, b.id, b.status, b.grund, ich.name); return json(res, 200, { ok: true }); }
       if (p === '/api/bewerber/notiz') { if (!String(b.text || '').trim()) throw new Error('Notiz ist leer'); if (!db.prepare('SELECT 1 FROM bewerber WHERE id = ?').get(Number(b.id))) throw new Error('Bewerber nicht gefunden'); BW.verlauf(db, Number(b.id), ich.name, String(b.text).trim()); return json(res, 200, { ok: true }); }
-      if (p === '/api/bewerber/einstellen') return json(res, 200, { ok: true, mitarbeiter_id: BW.einstellen(db, b.id, b, ich.name, PERSONAL) });
+      if (p === '/api/bewerber/einstellen') { const mid = BW.einstellen(db, b.id, b, ich.name, PERSONAL); RG.checklisteAnlegen(db, 'eintritt', mid, b.eintritt, ich.name); return json(res, 200, { ok: true, mitarbeiter_id: mid }); }
       if (p === '/api/bewerber/loeschen') {
         const x = db.prepare('SELECT * FROM bewerber WHERE id = ?').get(Number(b.id)); if (!x) throw new Error('Bewerber nicht gefunden');
         if (x.status === 'eingestellt') throw new Error('Eingestellte Bewerber leben in der Personalakte weiter — hier nicht löschen.');
@@ -770,6 +785,63 @@ async function bueroApi(req, res, p, q, ich) {
         fs.writeFileSync(path.join(PERSONAL, name), inhalt);
         return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO bewerber_dokument (bewerber_id, titel, datei, typ) VALUES (?,?,?,?)').run(Number(b.bewerber_id), b.titel || 'Bewerbung', name, m[1]).lastInsertRowid) });
       }
+    } catch (e) { throw new Fehler(400, e.message); }
+  }
+  // --- Register (Arbeitsschutz, Ausstattung, Fuhrpark, Qualität & Verwaltung)
+  if (p === '/api/register' && req.method === 'GET') {
+    try {
+      const id = q.get('id');
+      if (!id) return json(res, 200, { katalog: RG.katalog(db), fristen: RG.fristen(db, Number(q.get('tage')) || 30), ersthelfer: RG.ersthelferQuote(db), unterweisungen: UW.faellig(db).length });
+      const r = RG.def(id);
+      if (q.get('eintrag')) { const d = RG.holen(db, id, q.get('eintrag')); return json(res, 200, { register: r, eintrag: d, hinweise: RG.hinweise(db, id, d) }); }
+      const l = RG.liste(db, id); return json(res, 200, { register: r, liste: l.map(function (d) { d.hinweise = RG.hinweise(db, id, d); return d; }), fristen: RG.fristen(db, 30, id) });
+    } catch (e) { throw new Fehler(404, e.message); }
+  }
+  if (p === '/api/register.csv') { let t; try { t = RG.csv(db, q.get('id')); } catch (e) { throw new Fehler(404, e.message); } res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + RG.def(q.get('id')).titel.replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') + '_' + heute() + '.csv"', 'Cache-Control': 'no-store' }); return res.end(t); }
+  if (p === '/api/register.pdf') {
+    let buf, d; try { d = RG.holen(db, q.get('id'), q.get('eintrag')); buf = await BRIEF.registerBlatt(db, q.get('id'), d); } catch (e) { throw new Fehler(404, e.message); }
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="' + (RG.def(q.get('id')).pdf || 'Registerblatt').replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') + '_' + d.id + '.pdf"', 'Cache-Control': 'no-store' }); return res.end(buf);
+  }
+  if (p === '/api/register/datei' && req.method === 'GET') {
+    let d; try { d = RG.holen(db, q.get('id'), q.get('eintrag')); } catch (e) { throw new Fehler(404, e.message); }
+    const v = d[q.get('feld')]; if (!v || !v.datei) throw new Fehler(404, 'Keine Datei hinterlegt');
+    const datei = path.join(REGDATEIEN, path.basename(v.datei)); if (!fs.existsSync(datei)) throw new Fehler(404, 'Datei fehlt');
+    res.writeHead(200, { 'Content-Type': v.typ || 'application/octet-stream', 'Content-Disposition': 'inline; filename="' + q.get('feld') + '_' + d.id + path.extname(v.datei) + '"', 'Cache-Control': 'no-store' });
+    return fs.createReadStream(datei).pipe(res);
+  }
+  if (p.startsWith('/api/register') && req.method === 'POST') {
+    const b = await leib(req);
+    try {
+      if (p === '/api/register') return json(res, 200, { ok: true, id: RG.speichern(db, b.register, b, ich.name) });
+      if (p === '/api/register/loeschen') { if (!RG.loeschen(db, b.register, b.id)) throw new Error('Eintrag nicht gefunden'); return json(res, 200, { ok: true }); }
+      if (p === '/api/register/checkliste') { const id = RG.checklisteAnlegen(db, b.art === 'austritt' ? 'austritt' : 'eintritt', b.mitarbeiter_id, b.stichtag, ich.name); if (!id) throw new Error('Für diese Person gibt es die Checkliste schon'); return json(res, 200, { ok: true, id: id }); }
+      if (p === '/api/register/datei') {
+        const m = String(b.datei || '').match(/^data:(application\/pdf|image\/jpeg|image\/png|image\/webp);base64,(.+)$/); if (!m) throw new Error('Bitte PDF, JPG oder PNG hochladen.');
+        const inhalt = Buffer.from(m[2], 'base64'); if (inhalt.length > 10e6) throw new Error('Die Datei ist größer als 10 MB.');
+        const name = 'rg-' + String(b.register).replace(/[^a-z]/g, '') + Number(b.id) + '-' + Date.now() + '-' + require('crypto').randomBytes(4).toString('hex') + { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[m[1]];
+        fs.writeFileSync(path.join(REGDATEIEN, name), inhalt);
+        RG.dateiSetzen(db, b.register, b.id, b.feld, name, m[1]);   // die alte Fassung bleibt als Datei liegen (Nachweis)
+        return json(res, 200, { ok: true });
+      }
+    } catch (e) { throw new Fehler(400, e.message); }
+  }
+  // --- Unterweisungen und Dienstanweisungen
+  if (p === '/api/unterweisung' && req.method === 'GET') {
+    if (q.get('id')) { const t = UW.thema(db, q.get('id')); if (!t) throw new Fehler(404, 'Thema nicht gefunden'); return json(res, 200, t); }
+    if (q.get('mitarbeiter')) return json(res, 200, UW.person(db, q.get('mitarbeiter')));
+    return json(res, 200, { themen: UW.themen(db), faellig: UW.faellig(db) });
+  }
+  if (p === '/api/unterweisung.pdf') {
+    const t = UW.thema(db, q.get('id')); if (!t) throw new Fehler(404, 'Thema nicht gefunden');
+    const buf = await BRIEF.unterweisungsnachweis(db, t);
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="Unterweisung_' + t.titel.replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') + '.pdf"', 'Cache-Control': 'no-store' }); return res.end(buf);
+  }
+  if (p.startsWith('/api/unterweisung') && req.method === 'POST') {
+    const b = await leib(req);
+    try {
+      if (p === '/api/unterweisung') return json(res, 200, Object.assign({ ok: true }, UW.speichern(db, b)));
+      if (p === '/api/unterweisung/nachweis') return json(res, 200, { ok: true, anzahl: UW.nachweisen(db, b, ich.name) });
+      if (p === '/api/unterweisung/archivieren') { UW.archivieren(db, b.id); return json(res, 200, { ok: true }); }
     } catch (e) { throw new Fehler(400, e.message); }
   }
   // --- Objektauswertung und Controlling
@@ -913,7 +985,7 @@ function sicherung() {
     fs.readdirSync(ordner).filter(function (f) { return /^staffclean-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f); }).sort().reverse().slice(14).forEach(function (f) { fs.unlinkSync(path.join(ordner, f)); });
     // Dateien (Fotos, Personaldokumente) laufend mitsichern: neue Dateien werden kopiert, nichts wird überschrieben —
     // eine versehentlich gelöschte Personalakte-Datei bleibt in der Sicherung erhalten
-    [['fotos', FOTOS], ['personal', PERSONAL]].forEach(function (x) {
+    [['fotos', FOTOS], ['personal', PERSONAL], ['register', REGDATEIEN]].forEach(function (x) {
       const ziel = path.join(ordner, 'dateien', x[0]); fs.mkdirSync(ziel, { recursive: true });
       fs.readdirSync(x[1]).forEach(function (f) { const z = path.join(ziel, f); if (!fs.existsSync(z)) fs.copyFileSync(path.join(x[1], f), z); });
     });

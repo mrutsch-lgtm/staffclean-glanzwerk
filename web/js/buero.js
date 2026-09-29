@@ -488,7 +488,7 @@
   window.GW = { kopf, feld, auswahl, formDaten, knoepfe, reiter, schublade, schubladeZu, objekteListe, euro, std, route, TAGE, SPRACHEN, bausteine, inhalt: inhalt, titel: titel, objekteNeu: function () { objekteCache = null; } };
   async function route() {
     const [v, arg] = (location.hash.slice(1) || 'uebersicht').split('/');
-    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung', mahnung: 'abrechnung', person: 'mitarbeiter', board: 'planner', kandidat: 'bewerber', report: 'controlling' }[v] || v;
+    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung', mahnung: 'abrechnung', person: 'mitarbeiter', board: 'planner', kandidat: 'bewerber', report: 'controlling', register: 'sicherheit' }[v] || v;
     // Unterziel (z. B. #abrechnung/op) hat einen eigenen Menüpunkt → der ist aktiv, sonst der Hauptpunkt
     const genau = arg && document.querySelector('#nav a[data-v="' + v + '-' + arg + '"]') ? v + '-' + arg : nav;
     $$('#nav a').forEach(function (a) { a.classList.toggle('aktiv', a.dataset.v === genau); });

@@ -396,3 +396,22 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 /* App: Chat-Blase über der festen Leiste „Mangel melden" statt darauf */
 body:has(.app-fuss:not([hidden])) .komm-knopf { bottom: 6.2rem; }
 body:has(.app-fuss:not([hidden])) .komm-panel { bottom: 10.4rem; height: calc(100vh - 12rem); }
+
+/* ---------- Arbeitsschutz & QM: Register, Unterweisungen */
+.reg-kachel { display: flex; justify-content: space-between; align-items: center; gap: .8rem; padding: .7rem .2rem; border-bottom: 1px solid var(--grau-200); color: inherit; text-decoration: none; min-height: 44px; }
+.reg-kachel:last-child { border-bottom: 0; }
+.reg-kachel:hover b { color: var(--gruen-700, #047857); }
+.formular .feld.breit, .formular .breit { grid-column: 1 / -1; }
+.reg-mehr { border: 1px solid var(--grau-200); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; }
+.reg-mehr legend { padding: 0 .3rem; }
+.reg-mehr label, .feld.reg-ja { display: flex; align-items: center; gap: .45rem; min-height: 36px; font-weight: 500; }
+.reg-mehr input, .feld.reg-ja input { width: 1.2rem; height: 1.2rem; flex: none; }
+.reg-tabelle { display: grid; gap: .6rem; margin: .5rem 0; }
+.reg-zeile { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) auto; gap: .5rem; align-items: end; padding: .6rem; border: 1px solid var(--grau-200); border-radius: 10px; background: var(--grau-100); }
+.reg-zeile .feld.reg-ja { align-self: center; }
+.reg-weg { min-width: 36px; }
+.balken { height: 6px; border-radius: 3px; background: var(--grau-200); overflow: hidden; min-width: 60px; }
+.balken i { display: block; height: 100%; background: var(--gold, #c9a227); }
+@media (max-width: 600px) { .reg-zeile { grid-template-columns: 1fr 1fr; } .reg-zeile .reg-weg { grid-column: 1 / -1; } }
+/* Handy: lange deutsche Komposita („Gefährdungsbeurteilungen") passen in die Überschrift, ohne mitten im Wort zu brechen */
+@media (max-width: 600px) { h1 { font-size: 1.6rem; } }

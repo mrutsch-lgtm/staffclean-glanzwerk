@@ -1,7 +1,7 @@
 // knopf-inventur.js — bricht ab, wenn ein Knopf der Oberfläche in der Browser-Abnahme nicht vorkommt (npm run abnahme).
 const fs = require('fs'), path = require('path'), B = path.join(__dirname, '..') + '/';
 const test = fs.readFileSync(B + 'test/abnahme-browser.js', 'utf8');
-const quellen = ['web/js/buero.js', 'web/js/buero-abrechnung.js', 'web/js/buero-personal.js', 'web/js/buero-objekt.js', 'web/js/buero-bewerber.js', 'web/js/buero-controlling.js', 'web/js/buero-planner.js', 'web/js/komm.js', 'web/js/app.js', 'web/js/kunde.js'];
+const quellen = ['web/js/buero.js', 'web/js/buero-abrechnung.js', 'web/js/buero-personal.js', 'web/js/buero-objekt.js', 'web/js/buero-bewerber.js', 'web/js/buero-controlling.js', 'web/js/buero-planner.js', 'web/js/buero-register.js', 'web/js/komm.js', 'web/js/app.js', 'web/js/kunde.js'];
 const fehlend = [], gesamt = new Set();
 quellen.forEach(function (q) {
   const s = fs.readFileSync(B + q, 'utf8');
