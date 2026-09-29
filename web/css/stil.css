@@ -355,3 +355,41 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
   .leiste .pille:first-child { display: none; }
   html, body { overflow-x: hidden; }
 }
+
+/* ---------- Handy (gemessen auf echtem Android, Pixel 6 / Chrome): Tippziele ≥ 36 px, nichts ragt über den Rand */
+@media (max-width: 600px) {
+  .leiste .pille { min-height: 36px; display: inline-flex; align-items: center; padding: 0 .85rem; }
+  .karte.zeile { flex-wrap: wrap; }
+  .karte.zeile > * { min-width: 0; max-width: 100%; }
+  .komm-chatkopf button { min-width: 40px; min-height: 40px; }
+  .knopf.klein { min-height: 36px; }
+  .reiter button { min-height: 38px; }
+}
+/* Handy: Eingabefelder mit 16 px — darunter zoomen mobile Browser beim Antippen heran und die Seite verrutscht */
+@media (max-width: 900px) {
+  input, select, textarea, .feld input, .feld select, .feld textarea { font-size: 16px !important; }
+}
+/* Auswahlfelder nie breiter als ihre Spalte (lange Einträge wie „deutsche Staatsangehörigkeit") */
+.feld select, .feld input, .feld textarea { max-width: 100%; min-width: 0; }
+.formular > * { min-width: 0; }
+/* Handy-Feinschliff (Bildkontrolle auf echtem Android): Menü bündig, aktiver Punkt als Fläche, Filter volle Breite */
+@media (max-width: 900px) {
+  .nav > a, .nav .menue > button { font-size: .82rem; letter-spacing: .05em; padding: .7rem .8rem; border-radius: 10px; display: block; text-align: left; }
+  .nav > a.aktiv::after, .nav .menue.aktiv > button::before { display: none; }
+  .nav > a.aktiv, .nav .menue.aktiv > button { background: rgba(52, 211, 153, .12); }
+  .nav .unter a { padding: .65rem .8rem; }
+}
+@media (max-width: 600px) {
+  .karte.zeile > div { width: 100%; }
+  .karte.zeile .feld { flex: 1 1 140px; }
+  .karte.zeile .feld input, .karte.zeile .feld select { width: 100%; }
+  .titelband .knopf { flex: 1 1 auto; justify-content: center; }
+}
+.nur-touch { display: none; }
+@media (pointer: coarse) { .nur-maus { display: none; } .nur-touch { display: inline; } }
+/* Handy: Kopfknöpfe als ruhiges Raster, zwei gleich breite Spalten, Text mittig */
+@media (max-width: 600px) {
+  .kopfknoepfe { display: grid !important; grid-template-columns: 1fr 1fr; gap: .5rem !important; }
+  .kopfknoepfe .knopf { width: 100%; justify-content: center; text-align: center; padding: .7rem .6rem; font-size: .88rem; white-space: normal; line-height: 1.2; min-height: 48px; }
+  .titelband .knopf { flex: none; }
+}

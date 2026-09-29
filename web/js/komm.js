@@ -151,6 +151,8 @@
     bauen(); await aktualisieren();
     takt = setInterval(function () { if (!document.hidden) aktualisieren(); }, 15000);
   }
+  // Seitenwechsel im Büro schließt den Chat (am Handy liegt er sonst über der neuen Seite)
+  window.addEventListener('hashchange', function () { if (!offen) return; offen = false; const p = document.getElementById('kommPanel'); if (p) p.hidden = true; });
   window.KOMM = { direkt: direkt, aktualisieren: aktualisieren };
   if (!/\/(anmelden|einrichten|kunde)/.test(location.pathname)) starten();
 })();

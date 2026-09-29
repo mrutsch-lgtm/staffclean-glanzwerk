@@ -14,7 +14,7 @@
 
   function kopf(ueber, h1, text, knoepfe) {
     titel.innerHTML = '<div class="glas">' + ICON.gebaeude.replace('<svg', '<svg width="16" height="16"') + ' ' + esc(ueber) + '</div>' +
-      '<h1 style="margin-top:1rem">' + h1 + '</h1>' + (text ? '<p>' + text + '</p>' : '') + (knoepfe ? '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.2rem">' + knoepfe + '</div>' : '');
+      '<h1 style="margin-top:1rem">' + h1 + '</h1>' + (text ? '<p>' + text + '</p>' : '') + (knoepfe ? '<div class="kopfknoepfe" style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.2rem">' + knoepfe + '</div>' : '');
   }
   const feld = (n, t, v, typ, extra) => '<label class="feld">' + esc(t) + '<input name="' + n + '" type="' + (typ || 'text') + '" value="' + esc(v == null ? '' : v) + '"' + (extra || '') + '></label>';
   const auswahl = (n, t, optionen, wert) => '<label class="feld">' + esc(t) + '<select name="' + n + '">' + optionen.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(wert == null ? '' : wert) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></label>';
@@ -476,7 +476,7 @@
   }
 
   // ================================================================= Schublade, Router, Anmeldung
-  function schublade(html, bei) { $('#schubladeInhalt').innerHTML = html; $('#schublade').hidden = false; if (bei) bei($('#schubladeInhalt')); const a = $('#abbrechen'); if (a) a.onclick = schubladeZu; const erstes = $('#schubladeInhalt input, #schubladeInhalt select'); if (erstes) erstes.focus(); }
+  function schublade(html, bei) { $('#schubladeInhalt').innerHTML = html; $('#schublade').hidden = false; if (bei) bei($('#schubladeInhalt')); const a = $('#abbrechen'); if (a) a.onclick = schubladeZu; const erstes = $('#schubladeInhalt input, #schubladeInhalt select'); if (erstes && matchMedia('(pointer: fine)').matches) erstes.focus(); }   // am Handy kein Autofokus: die Tastatur verdeckt sonst die halbe Maske
   function schubladeZu() { $('#schublade').hidden = true; }
   $('#schublade').onclick = function (e) { if (e.target.id === 'schublade') schubladeZu(); };
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') schubladeZu(); });
