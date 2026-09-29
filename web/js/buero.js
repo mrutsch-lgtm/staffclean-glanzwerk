@@ -95,13 +95,14 @@
   // ================================================================= Objekte
   async function objekte() {
     objekteCache = null; const l = await objekteListe();
-    kopf('Objekte', 'Alle <span class="akzent">Objekte</span>', 'Jedes Objekt mit Räumen, Leistungsverzeichnis, Kalkulation, QR-Codes und Team.', '<button class="knopf gold" id="neuObjekt">+ Objekt anlegen</button><a class="knopf hell" href="#import">Aus Excel einlesen</a>');
+    const anlegen = !(window.GW_ICH && /^(einsatzleiter|objektleiter)$/.test(window.GW_ICH.berechtigung));   // Objekte legt der Planer an (Server prüft ebenso)
+    kopf('Objekte', 'Alle <span class="akzent">Objekte</span>', 'Jedes Objekt mit Räumen, Leistungsverzeichnis, Kalkulation, QR-Codes und Team.', anlegen ? '<button class="knopf gold" id="neuObjekt">+ Objekt anlegen</button>' + ((window.GW_ICH.bereiche || []).indexOf('stammdaten') >= 0 ? '<a class="knopf hell" href="#import">Aus Excel einlesen</a>' : '') : '');
     inhalt.innerHTML = l.length ? '<div class="raster k3">' + l.map(function (o) {
       return '<div class="karte klickbar objektkarte" data-objekt="' + o.id + '"><div class="symbolkasten">' + ICON.gebaeude + '</div><h3>' + esc(o.name) + '</h3><div class="leise klein">' + esc([o.kunde, o.strasse, o.ort].filter(Boolean).join(' · ')) + '</div>' +
         '<div style="display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap"><span class="marke">' + o.raeume + ' Räume</span><span class="marke gold">' + o.positionen + ' Leistungen</span>' + (o.monatspreis ? '<span class="marke">' + euro(o.monatspreis) + ' / Monat</span>' : '') + (o.status !== 'aktiv' ? '<span class="marke grau">' + esc(o.status) + '</span>' : '') + '</div></div>';
     }).join('') + '</div>' : '<div class="karte leer">Noch keine Objekte. Lies ein Leistungsverzeichnis ein oder lege ein Objekt an.</div>';
     $$('[data-objekt]').forEach(function (k) { k.onclick = function () { location.hash = '#objekt/' + k.dataset.objekt; }; });
-    $('#neuObjekt').onclick = function () { objektFormular({}); };
+    if ($('#neuObjekt')) $('#neuObjekt').onclick = function () { objektFormular({}); };
   }
   async function objektFormular(o) {
     const kunden = await holen('/api/kunden');
@@ -433,9 +434,16 @@
 
   // ================================================================= Stammdaten
   let stammReiter = 'taetigkeiten';
-  async function stammdaten() {
-    kopf('Stammdaten', 'Tätigkeiten, Tarife, <span class="akzent">Einstellungen</span>', 'Richtzeiten und Anleitungen je Tätigkeit (mit Übersetzungen für die App), Tarif Gebäudereinigerhandwerk mit Gültigkeit, Zuschläge und DATEV-Lohnarten, Büro-Zugänge.');
-    inhalt.innerHTML = reiter([['taetigkeiten', 'Tätigkeiten'], ['tarife', 'Tarife'], ['einstellungen', 'Einstellungen'], ['zugaenge', 'Büro-Zugänge']], stammReiter, function (r) { stammReiter = r; laden(); }) + '<div id="sBereich"></div>';
+  async function stammdaten(arg) {
+    if (arg === 'berechtigungen') stammReiter = 'zugaenge';
+    // Reiter nach Berechtigung: Tätigkeiten/Tarife = Stammdaten, Einstellungen/Berechtigungen = Administration (SecPlan-Vorbild)
+    const darf = (window.GW_ICH && window.GW_ICH.bereiche) || [];
+    const reiterListe = [['taetigkeiten', 'Tätigkeiten', 'stammdaten'], ['tarife', 'Tarife', 'stammdaten'], ['einstellungen', 'Einstellungen', 'administration'], ['zugaenge', 'Berechtigungen', 'administration']]
+      .filter(function (r) { return darf.indexOf(r[2]) >= 0; }).map(function (r) { return [r[0], r[1]]; });
+    if (!reiterListe.length) { inhalt.innerHTML = '<div class="karte hinweis">Dafür fehlt die Berechtigung.</div>'; return; }
+    if (!reiterListe.some(function (r) { return r[0] === stammReiter; })) stammReiter = reiterListe[0][0];
+    kopf('Stammdaten', 'Tätigkeiten, Tarife, <span class="akzent">Berechtigungen</span>', 'Richtzeiten und Anleitungen je Tätigkeit (mit Übersetzungen für die App), Tarif Gebäudereinigerhandwerk mit Gültigkeit, Zuschläge und DATEV-Lohnarten, Berechtigungen und Zugänge.');
+    inhalt.innerHTML = reiter(reiterListe, stammReiter, function (r) { stammReiter = r; laden(); }) + '<div id="sBereich"></div>';
     async function laden() {
       const b = $('#sBereich');
       if (stammReiter === 'taetigkeiten') {
@@ -465,9 +473,56 @@
           '<div class="formular" style="grid-template-columns:1fr;margin-top:.8rem"><label class="feld">Rechnung: Anschreiben (jede Zeile ein Absatz)<textarea name="rechnung_einleitung" rows="4">' + esc(e.rechnung_einleitung || '') + '</textarea></label><label class="feld">Rechnung: Schlusstext (jede Zeile ein Absatz)<textarea name="rechnung_schluss" rows="4">' + esc(e.rechnung_schluss || '') + '</textarea></label></div><p class="leise klein">Die Lohnart-Nummern sind Platzhalter — bitte mit dem Lohnbüro abstimmen. Ohne eigene Anschrift und Steuernummer (oder USt-IdNr.) lässt Glanzwerk keine Rechnung stellen (§ 14 UStG).</p><button class="knopf" id="eSpeichern">Speichern</button></div>';
         $('#eSpeichern').onclick = async function () { await holen('/api/einstellungen', formDaten(b)); meldung('Einstellungen gespeichert'); };
       } else {
-        const l = (await holen('/api/konten')).filter(function (k) { return k.rolle === 'buero'; });
-        b.innerHTML = '<div class="zeile" style="margin-bottom:.6rem"><span class="leise">Wer im Büro Glanzwerk bedient.</span><button class="knopf klein" id="neuBuero">+ Büro-Zugang</button></div><div class="scroll"><table class="tabelle"><thead><tr><th>Name</th><th>E-Mail</th><th>Status</th><th></th></tr></thead><tbody>' + l.map(function (k) { return '<tr><td><b>' + esc(k.name) + '</b></td><td>' + esc(k.email) + '</td><td>' + (k.aktiv ? '<span class="marke">aktiv</span>' : '<span class="marke grau">gesperrt</span>') + '</td><td><button class="knopf zweit klein" data-sp="' + k.id + '" data-an="' + (k.aktiv ? 1 : 0) + '">' + (k.aktiv ? 'sperren' : 'entsperren') + '</button> <button class="knopf zweit klein" data-pw="' + k.id + '">Passwort ändern</button></td></tr>'; }).join('') + '</tbody></table></div>';
-        $('#neuBuero').onclick = function () { schublade('<h2>Büro-Zugang</h2><div class="formular" style="margin-top:1rem">' + feld('name', 'Name', '') + feld('email', 'E-Mail', '', 'email') + feld('passwort', 'Passwort (mind. 10 Zeichen)', '', 'password', ' autocomplete="new-password"') + '</div>' + knoepfe('Anlegen'), function (w) { $('#speichern', w).onclick = async function () { const d = formDaten(w); d.rolle = 'buero'; try { await holen('/api/konto', d); schubladeZu(); meldung('Zugang angelegt'); laden(); } catch (e) { meldung(e.message); } }; }); };
+        // Administration → Berechtigungen, wie SecPlan 10.11: Lizenzen je Rolle, Vergabe an Mitarbeiter, Sonderberechtigungen
+        const B = await holen('/api/berechtigungen');
+        const rollenIds = Object.keys(B.rollen), l = B.konten;
+        const leiter = r => r === 'einsatzleiter' || r === 'objektleiter';
+        const sonderFuer = r => Object.keys(B.sonder).filter(function (s) { return B.sonder[s].fuer.indexOf(r) >= 0; });
+        const sonderText = k => Object.keys(k.sonderrechte || {}).filter(function (s) { return B.sonder[s]; }).map(function (s) { return B.sonder[s].titel; });
+        b.innerHTML = '<div class="raster k3" style="margin-bottom:1rem">' + rollenIds.map(function (r) { return '<div class="karte"><div class="ueberzeile">' + esc(B.rollen[r].titel) + '</div><div style="font-size:1.6rem;font-weight:700">' + (B.anzahl[r] || 0) + '</div><p class="leise klein">' + esc(B.rollen[r].text) + '</p></div>'; }).join('') + '</div>' +
+          '<div class="zeile" style="margin-bottom:.6rem"><span class="leise">Wer im Büro mit welcher Berechtigung arbeitet. Mitarbeiter ohne Berechtigung nutzen die App mit ihrer PIN.</span><span style="display:flex;gap:.4rem"><button class="knopf zweit klein" id="matrix">Rechte-Übersicht</button><button class="knopf klein" id="neuBuero">+ Berechtigung vergeben</button></span></div>' +
+          '<div class="scroll"><table class="tabelle"><thead><tr><th>Name</th><th>Berechtigung</th><th>Sonderberechtigungen</th><th>Objekte</th><th>E-Mail</th><th>Status</th><th></th></tr></thead><tbody>' +
+          l.slice().sort(function (x, y) { return rollenIds.indexOf(x.berechtigung) - rollenIds.indexOf(y.berechtigung) || x.name.localeCompare(y.name); }).map(function (k) {
+            const st = sonderText(k);
+            return '<tr><td><b>' + esc(k.name) + '</b>' + (k.mitarbeiter ? '<br><span class="leise klein">Mitarbeiterakte: ' + esc(k.mitarbeiter) + '</span>' : '') + '</td><td><span class="marke">' + esc((B.rollen[k.berechtigung] || B.rollen.admin).titel) + '</span></td>' +
+              '<td class="klein">' + (st.length ? st.map(esc).join('<br>') : '<span class="leise">–</span>') + '</td><td class="klein">' + (leiter(k.berechtigung) ? (k.objekte.length ? k.objekte.map(function (o) { const x = B.objekte.find(function (y) { return y.id === o; }); return esc(x ? x.name : '#' + o); }).join('<br>') : '<span class="marke orange">keine zugewiesen</span>') : '<span class="leise">alle</span>') + '</td>' +
+              '<td>' + esc(k.email) + '</td><td>' + (k.aktiv ? '<span class="marke">aktiv</span>' : '<span class="marke grau">gesperrt</span>') + '</td>' +
+              '<td style="white-space:nowrap"><button class="knopf zweit klein" data-be="' + k.id + '">bearbeiten</button> <button class="knopf zweit klein" data-pw="' + k.id + '">Passwort</button> <button class="knopf zweit klein" data-sp="' + k.id + '" data-an="' + (k.aktiv ? 1 : 0) + '">' + (k.aktiv ? 'sperren' : 'entsperren') + '</button></td></tr>';
+          }).join('') + '</tbody></table></div>';
+        // Formular für Vergabe und Bearbeitung: Sonderrechte und Objekte folgen der gewählten Rolle
+        const formular = function (k) {
+          const neu = !k.id;
+          const teil = r => '<h3 style="margin-top:1.2rem">Sonderberechtigungen</h3>' + (sonderFuer(r).length ? '<div class="formular" style="grid-template-columns:1fr">' + sonderFuer(r).map(function (s) { const d = B.sonder[s]; return '<label class="feld" style="flex-direction:row;align-items:center;gap:.5rem"><input type="checkbox" data-sr="' + s + '"' + (k.sonderrechte && k.sonderrechte[s] ? ' checked' : '') + ' style="width:auto"> ' + esc(d.titel) + (d.art === 'einschraenkung' ? ' <span class="marke orange">Einschränkung</span>' : '') + '</label>'; }).join('') + '</div>' : '<p class="leise klein">Für diese Berechtigung gibt es keine Sonderberechtigungen.</p>') +
+            (leiter(r) ? '<h3 style="margin-top:1.2rem">Zuständige Objekte</h3><p class="leise klein">Objekt- und Einsatzleiter sehen nur diese Objekte.</p><div class="formular" style="grid-template-columns:1fr 1fr">' + B.objekte.map(function (o) { return '<label class="feld" style="flex-direction:row;align-items:center;gap:.5rem"><input type="checkbox" data-ob="' + o.id + '"' + ((k.objekte || []).indexOf(o.id) >= 0 ? ' checked' : '') + ' style="width:auto"> ' + esc(o.name) + '</label>'; }).join('') + '</div>' : '');
+          schublade('<h2>' + (neu ? 'Berechtigung vergeben' : 'Berechtigung: ' + esc(k.name)) + '</h2><div class="formular" style="margin-top:1rem">' +
+            auswahl('mitarbeiter_id', 'Mitarbeiter (Personalakte)', [['', '— ohne Mitarbeiterakte —']].concat(B.mitarbeiter.map(function (m) { return [m.id, m.name]; })), k.mitarbeiter_id) +
+            auswahl('berechtigung', 'Berechtigung', rollenIds.map(function (r) { return [r, B.rollen[r].titel]; }), k.berechtigung || 'planer') +
+            (neu ? feld('name', 'Name', '') + feld('email', 'E-Mail (Anmeldung)', '', 'email') + feld('passwort', 'Passwort (mind. 10 Zeichen)', '', 'password', ' autocomplete="new-password"') : '') +
+            '</div><p class="leise klein" id="rollenText"></p><div id="rollenTeil"></div>' + knoepfe(neu ? 'Vergeben' : 'Speichern'), function (w) {
+            const rolleFeld = $('[name=berechtigung]', w), maFeld = $('[name=mitarbeiter_id]', w);
+            const zeigen = function () { $('#rollenText', w).textContent = B.rollen[rolleFeld.value].text; $('#rollenTeil', w).innerHTML = teil(rolleFeld.value); };
+            rolleFeld.onchange = function () { k = Object.assign({}, k, { sonderrechte: {} }); zeigen(); }; zeigen();
+            if (neu) maFeld.onchange = function () { const m = B.mitarbeiter.find(function (x) { return String(x.id) === maFeld.value; }); if (m && !$('[name=name]', w).value) $('[name=name]', w).value = m.name; };
+            $('#speichern', w).onclick = async function () {
+              const d = { berechtigung: rolleFeld.value, mitarbeiter_id: maFeld.value ? Number(maFeld.value) : null, sonderrechte: {}, objekte: [] };
+              $$('[data-sr]', w).forEach(function (c) { if (c.checked) d.sonderrechte[c.dataset.sr] = true; });
+              $$('[data-ob]', w).forEach(function (c) { if (c.checked) d.objekte.push(Number(c.dataset.ob)); });
+              try {
+                if (neu) await holen('/api/konto', Object.assign(d, { rolle: 'buero', name: $('[name=name]', w).value, email: $('[name=email]', w).value, passwort: $('[name=passwort]', w).value }));
+                else await holen('/api/konto', Object.assign(d, { id: k.id }));
+                schubladeZu(); meldung(neu ? 'Berechtigung vergeben' : 'Gespeichert'); laden();
+              } catch (e) { meldung(e.message); }
+            };
+          });
+        };
+        $('#neuBuero').onclick = function () { formular({}); };
+        $$('[data-be]').forEach(function (x) { x.onclick = function () { formular(l.find(function (k) { return k.id === Number(x.dataset.be); })); }; });
+        // Rechte-Übersicht wie „Berechtigungen im Bereich …" in SecPlan: Bereich × Rolle (Grundrechte, ohne Sonderberechtigungen)
+        $('#matrix').onclick = function () {
+          schublade('<h2>Rechte-Übersicht</h2><p class="leise klein">Grundrechte je Berechtigung. Sonderberechtigungen erweitern oder schränken sie je Person ein.</p><div class="scroll" style="margin-top:.8rem"><table class="tabelle"><thead><tr><th>Bereich</th>' + rollenIds.map(function (r) { return '<th style="text-align:center">' + esc(B.rollen[r].titel) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+            B.bereiche.map(function (be) { return '<tr><td>' + esc(be.titel) + '</td>' + rollenIds.map(function (r) { return '<td style="text-align:center">' + (B.grund[r].indexOf(be.id) >= 0 ? (leiter(r) && be.id === 'planung' ? '✓ <span class="leise klein">eigene Objekte</span>' : '✓') : '<span class="leise">–</span>') + '</td>'; }).join('') + '</tr>'; }).join('') +
+            '</tbody></table></div><div style="margin-top:1rem"><button class="knopf zweit" id="abbrechen">Schließen</button></div>');
+        };
         $$('[data-sp]').forEach(function (x) { x.onclick = async function () { try { await holen('/api/konto', { id: Number(x.dataset.sp), sperren: x.dataset.an === '1' }); meldung('Geändert'); laden(); } catch (e) { meldung(e.message); } }; });
         $$('[data-pw]').forEach(function (x) { x.onclick = function () { schublade('<h2>Passwort ändern</h2><div class="formular" style="margin-top:1rem">' + feld('passwort', 'Neues Passwort (mind. 10 Zeichen)', '', 'password', ' autocomplete="new-password"') + '</div>' + knoepfe(), function (w) { $('#speichern', w).onclick = async function () { try { await holen('/api/konto', { id: Number(x.dataset.pw), passwort: $('[name=passwort]', w).value }); schubladeZu(); meldung('Passwort geändert'); } catch (e) { meldung(e.message); } }; }); }; });
       }
@@ -483,6 +538,17 @@
   $('#navKnopf').onclick = function () { const o = $('#nav').classList.toggle('offen'); this.setAttribute('aria-expanded', o ? 'true' : 'false'); };
   $('#abmelden').onclick = async function () { await holen('/api/abmelden', {}); location.href = '/anmelden'; };
 
+  // Menü nach Berechtigung (SecPlan-Vorbild): was die Rolle nicht darf, erscheint nicht. Die Sicherung sitzt im Server.
+  const MENUE_BEREICH = { uebersicht: 'startseite', dienstplan: 'planung', tagesplan: 'planung', einsatz: 'planung', objekte: 'planung', qualitaet: 'planung', maengel: 'planung',
+    objektauswertung: 'controlling', import: 'stammdaten', mitarbeiter: 'personal', 'mitarbeiter-fristen': 'personal', fragebogen: 'personal', bewerber: 'bewerbungen', zeiten: 'abgleich',
+    kunden: 'kunden', abrechnung: 'abrechnung', 'abrechnung-op': 'abrechnung', 'abrechnung-auftraege': 'abrechnung', 'abrechnung-artikel': 'abrechnung', controlling: 'controlling',
+    sicherheit: 'arbeitsschutz', unterweisung: 'arbeitsschutz', 'register-gefahrstoffe': 'arbeitsschutz', 'register-ausgaben': 'arbeitsschutz', 'register-fahrzeuge': 'arbeitsschutz', 'register-subunternehmer': 'arbeitsschutz',
+    stammdaten: ['stammdaten', 'administration'], berechtigungen: 'administration' };
+  function menueNachBerechtigung(ich) {
+    const darf = ich.bereiche || [];
+    $$('#nav a[data-v]').forEach(function (a) { const b = MENUE_BEREICH[a.dataset.v]; if (!b) return; a.hidden = ![].concat(b).some(function (x) { return darf.indexOf(x) >= 0; }); });
+    $$('#nav .menue').forEach(function (m) { m.hidden = !m.querySelector('a[data-v]:not([hidden])'); });
+  }
   const ANSICHT = { uebersicht, dienstplan, objekte, objekt, tagesplan, import: lvImport, einsatz, qualitaet, pruefung, zeiten, kunden, maengel, stammdaten };
   // Bausteine für die Module (Abrechnung, Personal, Objektakte, Kommunikation, Planner) — die melden ihre Ansichten hier an
   window.GW = { kopf, feld, auswahl, formDaten, knoepfe, reiter, schublade, schubladeZu, objekteListe, euro, std, route, TAGE, SPRACHEN, bausteine, inhalt: inhalt, titel: titel, objekteNeu: function () { objekteCache = null; } };
@@ -497,11 +563,15 @@
     $('#nav').classList.remove('offen'); $('#navKnopf').setAttribute('aria-expanded', 'false');
     schubladeZu();
     const modul = window.GW_ANSICHTEN || {};
+    // Direkter Aufruf einer gesperrten Seite (z. B. #zeiten als Objektleiter): Hinweis statt Absturz
+    const seitenBereich = { objekt: 'planung', pruefung: 'planung', person: 'personal', kandidat: 'bewerbungen', rechnung: 'abrechnung', mahnung: 'abrechnung', report: 'controlling', register: 'arbeitsschutz' }[v] || MENUE_BEREICH[v];
+    const ichB = (window.GW_ICH && window.GW_ICH.bereiche) || null;
+    if (ichB && seitenBereich && ![].concat(seitenBereich).some(function (x) { return ichB.indexOf(x) >= 0; })) { kopf('Kein Zugriff', 'Dafür fehlt die <span class="akzent">Berechtigung</span>', 'Welche Bereiche du nutzen kannst, legt ein Admin unter Verwaltung → Berechtigungen fest.'); inhalt.innerHTML = ''; window.scrollTo(0, 0); return; }
     try { await (modul[v] || ANSICHT[v] || uebersicht)(arg); } catch (e) { if (/anmelden/i.test(e.message)) { location.href = '/anmelden'; return; } inhalt.innerHTML = '<div class="karte hinweis">' + esc(e.message) + '</div>'; }
     window.scrollTo(0, 0);
   }
   (async function () {
-    try { const ich = await UI.ich(); if (!ich) throw 0; if (ich.rolle !== 'buero') { location.href = ich.rolle === 'kunde' ? '/kunde' : '/app'; return; } $('#leisteName').textContent = ich.name; }
+    try { const ich = await UI.ich(); if (!ich) throw 0; if (ich.rolle !== 'buero') { location.href = ich.rolle === 'kunde' ? '/kunde' : '/app'; return; } $('#leisteName').textContent = ich.name; window.GW_ICH = ich; menueNachBerechtigung(ich); }
     catch (e) { location.href = '/anmelden'; return; }
     window.addEventListener('hashchange', route); route();
   })();

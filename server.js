@@ -37,6 +37,8 @@ const plusTageIso = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDa
 
 const db = DB.oeffnen();
 Z.tabellen(db);
+const R = require('./lib/rechte');   // Berechtigungen nach SecPlan-Vorbild (29.09.2026)
+R.tabellen(db);
 const KOMM = require('./lib/kommunikation');
 KOMM.tabellen(db);
 const BW = require('./lib/bewerber');
@@ -59,9 +61,9 @@ const jetzt = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000
 const TYPEN = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
 class Fehler extends Error { constructor(code, text) { super(text); this.code = code; } }
 
-function json(res, code, daten, kopf) { res.writeHead(code, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, kopf || {})); res.end(JSON.stringify(daten)); }
+function json(res, code, daten, kopf) { if (res.gwFilter && code < 300) daten = res.gwFilter(daten); res.writeHead(code, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, kopf || {})); res.end(JSON.stringify(daten)); }
 function roh(req, grenze) { return new Promise(function (ok, nein) { const teile = []; let n = 0; req.on('data', function (c) { n += c.length; if (n > grenze) { nein(new Fehler(413, 'Datei zu groß')); req.destroy(); } else teile.push(c); }); req.on('end', function () { ok(Buffer.concat(teile)); }); req.on('error', nein); }); }
-async function leib(req) { const b = await roh(req, 15e6); try { return JSON.parse(b.toString('utf8') || '{}'); } catch (e) { return {}; } }
+async function leib(req) { if (req.gwLeib !== undefined) return req.gwLeib; const b = await roh(req, 15e6); try { req.gwLeib = JSON.parse(b.toString('utf8') || '{}'); } catch (e) { req.gwLeib = {}; } return req.gwLeib; }
 // Hinter einem Webserver (Caddy, STAFFCLEAN_PROXY=1) kommt JEDE Anfrage von 127.0.0.1 — „direkt am Rechner" gilt
 // dort also nie, und die echte Adresse steht in X-Forwarded-For (nur vom eigenen Proxy übernommen).
 const HINTER_PROXY = process.env.STAFFCLEAN_PROXY === '1';
@@ -333,6 +335,37 @@ async function kommApi(req, res, p, q, ich) {
 }
 
 // ---------------------------------------------------------------- Büro
+// ---- Berechtigungen (SecPlan-Vorbild, 29.09.2026)
+function kontenListe() {
+  const obj = db.prepare('SELECT benutzer_id, objekt_id FROM objekt_berechtigung').all();
+  return db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, b.berechtigung, b.sonderrechte, b.mitarbeiter_id, m.name mitarbeiter, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id LEFT JOIN mitarbeiter m ON m.id = b.mitarbeiter_id ORDER BY b.rolle, b.name').all()
+    .map(function (k) { return Object.assign(k, { sonderrechte: R.sonderLesen(k.sonderrechte), objekte: obj.filter(function (o) { return o.benutzer_id === k.id; }).map(function (o) { return o.objekt_id; }) }); });
+}
+function objekteSetzen(id, liste) {
+  db.prepare('DELETE FROM objekt_berechtigung WHERE benutzer_id = ?').run(id);
+  const ins = db.prepare('INSERT OR IGNORE INTO objekt_berechtigung (benutzer_id, objekt_id) VALUES (?, ?)');
+  (liste || []).forEach(function (o) { if (!isNaN(Number(o))) ins.run(id, Number(o)); });
+}
+function berechtigungSpeichern(id, b, ich) {
+  const k = db.prepare("SELECT * FROM benutzer WHERE id = ? AND rolle = 'buero'").get(id); if (!k) throw new Fehler(404, 'Zugang nicht gefunden.');
+  if (b.berechtigung !== undefined) {
+    if (!R.ROLLEN[b.berechtigung]) throw new Fehler(400, 'Berechtigung unbekannt');
+    if (b.berechtigung !== 'admin' && (k.berechtigung || 'admin') === 'admin') {
+      if (id === ich.benutzer.id) throw new Fehler(400, 'Die eigene Admin-Berechtigung lässt sich nicht entziehen.');
+      const admins = db.prepare("SELECT COUNT(*) n FROM benutzer WHERE rolle = 'buero' AND aktiv = 1 AND COALESCE(berechtigung, 'admin') = 'admin'").get().n;
+      if (admins <= 1) throw new Fehler(400, 'Es muss mindestens ein Admin bleiben.');
+    }
+    db.prepare('UPDATE benutzer SET berechtigung = ? WHERE id = ?').run(b.berechtigung, id);
+  }
+  if (b.sonderrechte !== undefined) {
+    const erlaubt = {}; Object.keys(b.sonderrechte || {}).forEach(function (s) { if (R.SONDER[s] && b.sonderrechte[s]) erlaubt[s] = true; });
+    db.prepare('UPDATE benutzer SET sonderrechte = ? WHERE id = ?').run(JSON.stringify(erlaubt), id);
+  }
+  if (b.mitarbeiter_id !== undefined) db.prepare('UPDATE benutzer SET mitarbeiter_id = ? WHERE id = ?').run(b.mitarbeiter_id ? Number(b.mitarbeiter_id) : null, id);
+  if (b.objekte !== undefined) objekteSetzen(id, b.objekte);
+  // keine Abmeldung nötig: Z.wer liest Berechtigung und Sonderrechte bei jeder Anfrage frisch
+}
+
 async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/uebersicht') {
     const d = q.get('datum') || heute(), t = PLAN.tag(db, d);
@@ -915,12 +948,23 @@ async function bueroApi(req, res, p, q, ich) {
     if (b.id) { db.prepare('UPDATE kunde SET name=?, ansprechpartner=?, email=?, telefon=?, anschrift=?, plz=?, ort=?, kundennummer=?, leitweg_id=?, ust_id=?, sammelrechnung=?, rechnungsformat=?, zahlungsziel_tage=?, rechnung_email=?, steuerfall=?, privat=? WHERE id=?').run(...f, Number(b.id)); return json(res, 200, { ok: true, id: Number(b.id) }); }
     return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO kunde (name, ansprechpartner, email, telefon, anschrift, plz, ort, kundennummer, leitweg_id, ust_id, sammelrechnung, rechnungsformat, zahlungsziel_tage, rechnung_email, steuerfall, privat) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(...f).lastInsertRowid) });
   }
-  if (p === '/api/konten' && req.method === 'GET') return json(res, 200, db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id ORDER BY b.rolle, b.name').all());
+  if (p === '/api/konten' && req.method === 'GET') return json(res, 200, kontenListe());
+  if (p === '/api/berechtigungen' && req.method === 'GET') {
+    // Administration → Berechtigungen (SecPlan 10.11): Rollen mit Anzahl, Sonderberechtigungen, wer was hat
+    const konten = kontenListe().filter(function (k) { return k.rolle === 'buero'; });
+    const anzahl = {}; Object.keys(R.ROLLEN).forEach(function (r) { anzahl[r] = konten.filter(function (k) { return k.aktiv && k.berechtigung === r; }).length; });
+    return json(res, 200, { rollen: R.ROLLEN, sonder: R.SONDER, bereiche: Object.keys(R.BEREICHE).map(function (b) { return { id: b, titel: R.BEREICHE[b].titel }; }), grund: R.GRUND, anzahl: anzahl, konten: konten,
+      mitarbeiter: db.prepare('SELECT id, name FROM mitarbeiter WHERE aktiv = 1 ORDER BY name').all(), objekte: db.prepare("SELECT id, name FROM objekt WHERE status = 'aktiv' ORDER BY name").all() });
+  }
   if (p === '/api/konto' && req.method === 'POST') {
     const b = await leib(req);
     if (b.id && b.sperren != null) { if (Number(b.id) === ich.benutzer.id) throw new Fehler(400, 'Das eigene Konto lässt sich nicht sperren.'); db.prepare('UPDATE benutzer SET aktiv = ? WHERE id = ?').run(b.sperren ? 0 : 1, Number(b.id)); if (b.sperren) db.prepare('DELETE FROM sitzung WHERE benutzer_id = ?').run(Number(b.id)); return json(res, 200, { ok: true }); }
     if (b.id && b.passwort) { if (String(b.passwort).length < 10) throw new Fehler(400, 'Das Passwort braucht mindestens 10 Zeichen'); db.prepare('UPDATE benutzer SET pw = ? WHERE id = ?').run(Z.hash(b.passwort), Number(b.id)); return json(res, 200, { ok: true }); }
-    try { return json(res, 200, { ok: true, id: Z.kontoAnlegen(db, b) }); } catch (e) { throw new Fehler(400, /UNIQUE/.test(e.message) ? 'Diese E-Mail hat schon einen Zugang.' : e.message); }
+    if (b.id && (b.berechtigung !== undefined || b.sonderrechte !== undefined || b.objekte !== undefined || b.mitarbeiter_id !== undefined)) { berechtigungSpeichern(Number(b.id), b, ich); return json(res, 200, { ok: true }); }
+    if (b.rolle === 'buero' && b.berechtigung && !R.ROLLEN[b.berechtigung]) throw new Fehler(400, 'Berechtigung unbekannt');
+    let neu; try { neu = Z.kontoAnlegen(db, b); } catch (e) { throw new Fehler(400, /UNIQUE/.test(e.message) ? 'Diese E-Mail hat schon einen Zugang.' : e.message); }
+    if (b.rolle === 'buero' && Array.isArray(b.objekte)) objekteSetzen(neu, b.objekte);
+    return json(res, 200, { ok: true, id: neu });
   }
   if (p === '/api/tarife' && req.method === 'GET') return json(res, 200, db.prepare('SELECT * FROM tarif ORDER BY lohngruppe, gueltig_ab DESC').all());
   if (p === '/api/tarif' && req.method === 'POST') {
@@ -955,12 +999,18 @@ const server = http.createServer(async function (req, res) {
     if (p.startsWith('/api/')) {
       const o = await oeffentlich(req, res, p, q); if (o !== undefined || res.writableEnded) return;
       const ich = Z.wer(db, req);
-      if (p === '/api/ich') return json(res, ich ? 200 : 401, ich ? { rolle: ich.rolle, name: ich.name } : { fehler: 'nicht angemeldet' });
+      if (p === '/api/ich') return json(res, ich ? 200 : 401, ich ? Object.assign({ rolle: ich.rolle, name: ich.name }, ich.rolle === 'buero' ? { berechtigung: ich.benutzer.berechtigung || 'admin', bereiche: Array.from(R.bereiche(ich.benutzer)), sonderrechte: R.sonderLesen(ich.benutzer.sonderrechte) } : {}) : { fehler: 'nicht angemeldet' });
       if (!ich) throw new Fehler(401, 'Bitte anmelden.');
       if (p.startsWith('/api/komm/') || p.startsWith('/api/planner/')) { if (ich.rolle === 'kunde') throw new Fehler(403, 'Kein Zugriff.'); return await kommApi(req, res, p, q, ich); }
       if (p.startsWith('/api/app/')) { if (ich.rolle !== 'mitarbeiter') throw new Fehler(403, 'Nur in der Mitarbeiter-App.'); return await appApi(req, res, p, q, ich); }
       if (p.startsWith('/api/kunde/')) { if (ich.rolle !== 'kunde') throw new Fehler(403, 'Nur im Kundenportal.'); return await kundeApi(req, res, p, q, ich); }
       if (ich.rolle !== 'buero') throw new Fehler(403, 'Kein Zugriff.');
+      // Berechtigung je Büro-Konto (SecPlan-Vorbild): Bereich, zuständige Objekte, Einschränkungen. JSON-Rumpf wird dafür
+      // vorab gelesen und zwischengespeichert — Datei-Uploads (roh) bleiben unberührt.
+      const rumpf = req.method === 'POST' && /json/.test(req.headers['content-type'] || '') ? await leib(req) : null;
+      const recht = R.pruefen(db, ich.benutzer, p, q, rumpf, req.method);
+      if (recht.verboten) throw new Fehler(403, recht.verboten);
+      if (recht.filter) res.gwFilter = recht.filter;
       return await bueroApi(req, res, p, q, ich);
     }
     if (p.startsWith('/fotos/')) { const name = path.basename(p); const f = path.join(FOTOS, name); if (fotoErlaubt(Z.wer(db, req), name) && fs.existsSync(f)) { res.writeHead(200, { 'Content-Type': TYPEN[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'private, max-age=3600' }); return fs.createReadStream(f).pipe(res); } res.writeHead(404); return res.end(); }
