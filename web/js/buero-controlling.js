@@ -65,15 +65,68 @@
       v.slice().reverse().map(function (m) { return '<tr><td>' + monatText(m.monat) + '</td><td style="text-align:right">' + euro(m.umsatz) + '</td><td style="text-align:right">' + euro(m.lohnkosten) + '</td><td style="text-align:right;font-weight:700' + (m.db < 0 ? ';color:var(--rot)' : '') + '">' + euro(m.db) + '</td><td style="text-align:right">' + (m.dbProzent == null ? '–' : zahl(m.dbProzent) + ' %') + '</td><td style="text-align:right">' + zahl(m.sollStunden) + '</td><td style="text-align:right">' + zahl(m.istStunden) + '</td><td style="text-align:right">' + (m.stundensatz ? euro(m.stundensatz) : '–') + '</td><td style="text-align:right">' + m.erledigungen + '</td><td style="text-align:right">' + m.maengel + '</td></tr>'; }).join('') + '</tbody></table></div>';
   };
 
+
+  // ---------------------------------------------------------------- Report-Katalog und Report-Ansicht
+  const TYPZAHL = ['euro', 'std', 'prozent', 'zahl'];
+  async function katalogZeigen(b) {
+    const l = await holen('/api/reports'), gruppen = [...new Set(l.map(function (r) { return r.gruppe; }))];
+    b.innerHTML = '<div class="karte zeile" style="margin-bottom:1rem;flex-wrap:wrap"><label class="feld" style="flex:1;min-width:220px">Report suchen<input id="repSuche" placeholder="z. B. Karteileichen, Minijob, Rendite"></label><span class="leise klein">' + l.length + ' Reports · jeder als Tabelle, CSV und Druck/PDF</span></div><div id="repListe"></div>';
+    const zeigenK = function () {
+      const s = $('#repSuche').value.toLowerCase();
+      $('#repListe').innerHTML = gruppen.map(function (g) { const r = l.filter(function (x) { return x.gruppe === g && (!s || (x.titel + ' ' + x.text).toLowerCase().includes(s)); }); if (!r.length) return '';
+        return '<h3 style="margin:1.2rem 0 .6rem">' + esc(g) + '</h3><div class="raster k3">' + r.map(function (x) { return '<a class="karte klickbar" style="text-decoration:none;color:inherit" href="#report/' + x.id + '" data-report="' + x.id + '"><b>' + esc(x.titel) + '</b><div class="leise klein" style="margin-top:.3rem">' + esc(x.text) + '</div></a>'; }).join('') + '</div>'; }).join('') || '<div class="karte leer">Kein Report passt.</div>';
+    };
+    $('#repSuche').oninput = zeigenK; zeigenK();
+  }
+  const repPar = {};
+  A.report = async function report(id) {
+    const l = await holen('/api/reports'), r = l.find(function (x) { return x.id === id; }); if (!r) { location.hash = '#controlling/reports'; return; }
+    const p = repPar[id] = repPar[id] || Object.assign({}, r.standard);
+    G.kopf('Controlling · ' + r.gruppe, esc(r.titel), esc(r.text), '<button class="knopf hell" id="repCsv">Als Tabelle (CSV)</button><button class="knopf hell" id="repDruck">Drucken / PDF</button><a class="knopf hell" href="#controlling/reports">Alle Reports</a>');
+    const monatStart = heute().slice(0, 8) + '01', zukunft = r.p.indexOf('zeitraum_zukunft') >= 0;
+    inhalt.innerHTML = '<div class="karte zeile" style="margin-bottom:1rem;flex-wrap:wrap"><div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap" id="repParam">' +
+      (r.p.indexOf('zeitraum') >= 0 || zukunft ? '<label class="feld">Schnellwahl<select id="repSchnell"><option value="">—</option><option value="monat">dieser Monat</option><option value="vormonat">Vormonat</option><option value="quartal">dieses Quartal</option><option value="jahr">dieses Jahr</option><option value="vorjahr">Vorjahr</option></select></label>' + G.feld('von', 'von', p.von || (zukunft ? heute() : monatStart), 'date') + G.feld('bis', 'bis', p.bis || (zukunft ? UI.plusTage(heute(), 13) : heute()), 'date') : '') +
+      (r.p.indexOf('jahr') >= 0 ? G.feld('jahr', 'Jahr', p.jahr || heute().slice(0, 4), 'number', ' min="2020" max="2100"') : '') + (r.p.indexOf('tage') >= 0 ? G.feld('tage', 'Tage', p.tage || 60, 'number', ' min="1"') : '') +
+      '<label class="feld">Suche in der Tabelle<input id="repFilter" placeholder="Name, Objekt …"></label><button class="knopf klein" id="repLaden" style="margin-bottom:.1rem">Anzeigen</button></div><span class="leise klein" id="repAnzahl"></span></div><div id="repTabelle"></div>';
+    let e = null, sort = { k: null, ab: true };
+    const params = function () { const d = {}; $$('#repParam [name]').forEach(function (i) { if (i.value) d[i.name] = i.value; }); Object.assign(p, d); return Object.keys(d).map(function (k) { return k + '=' + encodeURIComponent(d[k]); }).join('&'); };
+    const wert = (s, v) => v == null || v === '' ? '<span class="leise">–</span>' : s.typ === 'euro' ? euro(v) : s.typ === 'std' ? zahl(v) : s.typ === 'prozent' ? zahl(v) + ' %' : s.typ === 'datum' && /^\d{4}-\d{2}-\d{2}/.test(v) ? datumDe(String(v).slice(0, 10)) : esc(v);
+    const ziel = z => z.mitarbeiter_id ? '#person/' + z.mitarbeiter_id : z.objekt_id ? '#objekt/' + z.objekt_id : z.rechnung_id ? '#rechnung/' + z.rechnung_id : '';
+    function tabelle() {
+      const f = $('#repFilter').value.toLowerCase();
+      let zl = e.zeilen.filter(function (z) { return !f || e.spalten.some(function (s) { return String(z[s.k] == null ? '' : z[s.k]).toLowerCase().includes(f); }); });
+      if (sort.k) { const s = e.spalten.find(function (x) { return x.k === sort.k; }); zl = zl.slice().sort(function (a, b2) { const u = a[sort.k], v = b2[sort.k]; if (u == null) return 1; if (v == null) return -1; const c = TYPZAHL.indexOf(s.typ) >= 0 ? u - v : String(u).localeCompare(String(v), 'de'); return sort.ab ? -c : c; }); }
+      $('#repAnzahl').textContent = zl.length + ' von ' + e.zeilen.length + ' Zeilen';
+      const summen = e.spalten.map(function (s) { return (s.typ === 'euro' || s.typ === 'std') && !/lohn$|satz/i.test(s.k) ? zl.reduce(function (a, z) { return a + (Number(z[s.k]) || 0); }, 0) : null; });
+      $('#repTabelle').innerHTML = zl.length ? '<div class="scroll"><table class="tabelle"><thead><tr>' + e.spalten.map(function (s) { return '<th data-rsort="' + s.k + '" style="cursor:pointer;white-space:nowrap' + (TYPZAHL.indexOf(s.typ) >= 0 ? ';text-align:right' : '') + '">' + esc(s.t) + (sort.k === s.k ? (sort.ab ? ' ▼' : ' ▲') : '') + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        zl.map(function (z) { const h = ziel(z); return '<tr' + (h ? ' style="cursor:pointer" data-rziel="' + h + '"' : '') + '>' + e.spalten.map(function (s) { const v = z[s.k], warn = s.k === 'hinweis' && v; return '<td style="' + (TYPZAHL.indexOf(s.typ) >= 0 ? 'text-align:right;' : '') + (warn ? 'color:var(--rot);font-weight:600' : '') + '">' + wert(s, v) + '</td>'; }).join('') + '</tr>'; }).join('') +
+        (summen.some(function (x) { return x != null; }) ? '<tr style="font-weight:800;border-top:2px solid var(--linie)">' + e.spalten.map(function (s, i) { return '<td style="text-align:right">' + (i === 0 ? '<span style="float:left">Summe</span>' : summen[i] != null ? wert(s, Math.round(summen[i] * 100) / 100) : '') + '</td>'; }).join('') + '</tr>' : '') + '</tbody></table></div>' : '<div class="karte leer">Keine Einträge für diese Auswahl.</div>';
+      $$('[data-rsort]').forEach(function (t) { t.onclick = function () { const k = t.dataset.rsort; sort = { k: k, ab: sort.k === k ? !sort.ab : true }; tabelle(); }; });
+      $$('[data-rziel]').forEach(function (t) { t.onclick = function () { location.hash = t.dataset.rziel; }; });
+    }
+    const laden2 = fehler(async function () { e = await holen('/api/report?id=' + id + '&' + params()); tabelle(); });
+    $('#repLaden').onclick = laden2; $('#repFilter').oninput = function () { if (e) tabelle(); };
+    const sw = $('#repSchnell'); if (sw) sw.onchange = function () {
+      const d = new Date(), j = d.getFullYear(), m = d.getMonth(), iso = x => new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const b = { monat: [new Date(j, m, 1), new Date(j, m + 1, 0)], vormonat: [new Date(j, m - 1, 1), new Date(j, m, 0)], quartal: [new Date(j, Math.floor(m / 3) * 3, 1), new Date(j, Math.floor(m / 3) * 3 + 3, 0)], jahr: [new Date(j, 0, 1), new Date(j, 11, 31)], vorjahr: [new Date(j - 1, 0, 1), new Date(j - 1, 11, 31)] }[this.value];
+      if (!b) return; $('#repParam [name=von]').value = iso(b[0]); $('#repParam [name=bis]').value = iso(b[1]); laden2();
+    };
+    $('#repCsv').onclick = fehler(async function () { await laden({ u: '/api/report.csv?id=' + id + '&' + params() }, r.titel.replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') + '.csv'); });
+    $('#repDruck').onclick = function () { window.open('/drucken/report?id=' + id + '&' + params(), '_blank'); };
+    laden2();
+  };
+
   // ---------------------------------------------------------------- Controlling mit Schnittstellen
   let reiterC = 'ueberblick', camtXml = '';
   A.controlling = async function controlling(arg) {
-    if (arg && ['ueberblick', 'datev', 'bank', 'lastschrift', 'debitoren', 'einstellungen'].indexOf(arg) >= 0) reiterC = arg;
+    if (arg && ['ueberblick', 'reports', 'datev', 'bank', 'lastschrift', 'debitoren', 'einstellungen'].indexOf(arg) >= 0) reiterC = arg;
     const c = await holen('/api/controlling');
-    G.kopf('Controlling', 'Zahlen und <span class="akzent">Schnittstellen</span>', 'Monatsverlauf von Umsatz, Lohn, Deckungsbeitrag und Zahlungseingang — und die Dateien für Steuerbüro, Lohnbüro und Bank: DATEV-Buchungsstapel, LODAS, Kontoauszug einlesen, SEPA-Lastschrift.', '<a class="knopf gold" href="#objektauswertung">Objektauswertung</a>');
-    inhalt.innerHTML = G.reiter([['ueberblick', 'Überblick'], ['datev', 'DATEV (Steuer- & Lohnbüro)'], ['bank', 'Kontoauszug abgleichen'], ['lastschrift', 'SEPA-Lastschrift'], ['debitoren', 'Debitoren & Mandate'], ['einstellungen', 'Einstellungen']], reiterC, function (r) { reiterC = r; zeigen(); }) + '<div id="cBereich"></div>';
+    G.kopf('Controlling', 'Zahlen und <span class="akzent">Schnittstellen</span>', 'Monatsverlauf von Umsatz, Lohn, Deckungsbeitrag und Zahlungseingang — und die Dateien für Steuerbüro, Lohnbüro und Bank: DATEV-Buchungsstapel, LODAS, Kontoauszug einlesen, SEPA-Lastschrift.', '<a class="knopf gold" href="#objektauswertung">Objektauswertung</a><button class="knopf hell" id="cBericht">Bericht Geschäftsführung (PDF)</button>');
+    inhalt.innerHTML = G.reiter([['ueberblick', 'Überblick'], ['reports', 'Reports'], ['datev', 'DATEV (Steuer- & Lohnbüro)'], ['bank', 'Kontoauszug abgleichen'], ['lastschrift', 'SEPA-Lastschrift'], ['debitoren', 'Debitoren & Mandate'], ['einstellungen', 'Einstellungen']], reiterC, function (r) { reiterC = r; zeigen(); }) + '<div id="cBereich"></div>';
+    $('#cBericht').onclick = function () { const m = prompt('Monat für den Bericht (JJJJ-MM)', (function () { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })()); if (m) window.open('/api/bericht/geschaeftsfuehrung?monat=' + encodeURIComponent(m), '_blank'); };
     function zeigen() {
       const b = $('#cBereich');
+      if (reiterC === 'reports') return katalogZeigen(b);
       if (reiterC === 'ueberblick') {
         const m = c.monate, max = Math.max.apply(null, m.map(function (x) { return Math.max(x.umsatz, x.lohnkosten, x.zahlungseingang); }).concat([1])), s = m.reduce(function (a, x) { a.u += x.umsatz; a.l += x.lohnkosten; a.z += x.zahlungseingang; a.h += x.istStunden; return a; }, { u: 0, l: 0, z: 0, h: 0 });
         const kachel = (t, w, z, warn) => '<div class="karte kennzahl" style="padding:.8rem 1rem"><div class="ueberzeile">' + t + '</div><div style="font-size:1.3rem;font-weight:800' + (warn ? ';color:var(--rot)' : '') + '">' + w + '</div><div class="leise klein">' + (z || '') + '</div></div>';

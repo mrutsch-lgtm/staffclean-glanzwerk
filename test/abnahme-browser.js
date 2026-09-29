@@ -586,6 +586,20 @@ async function stufe3(b) {
   const [ls] = await Promise.all([s.waitForEvent('download'), s.click('#lsErzeugen')]); const lsp = path.join(DATEN, 'pain008.xml'); await ls.saveAs(lsp);
   if (!/pain\.008\.001\.08/.test(fs.readFileSync(lsp, 'utf8')) || !/<SeqTp>FRST<\/SeqTp>/.test(fs.readFileSync(lsp, 'utf8'))) throw new Error('Lastschriftdatei falsch'); ok('SEPA-Lastschrift pain.008 mit Erst-Lastschrift');
   await klick(s, '[data-reiter=ueberblick]', 'Controlling-Überblick'); await bild(s, 'b34-controlling');
+  // Reports: Katalog, jeder Report lädt, Sortieren, Filtern, CSV, Druckansicht, Sprung in die Akte; Bericht Geschäftsführung
+  await klick(s, '[data-reiter=reports]', 'Reiter Reports'); const anzahl = await s.locator('[data-report]').count(); if (anzahl < 30) throw new Error('nur ' + anzahl + ' Reports im Katalog'); ok(anzahl + ' Reports im Katalog');
+  await s.fill('#repSuche', 'Karteileichen'); await ruhig(s); if (await s.locator('[data-report]').count() !== 1) throw new Error('Suche im Katalog'); ok('Report-Suche');
+  await s.locator('[data-report="karteileichen"]').click(); await s.waitForURL(/#report\/karteileichen/); await s.locator('#repTabelle table').waitFor(); ok('Karteileichen geöffnet');
+  await s.fill('#repParam [name=tage]', '1'); await klick(s, '#repLaden', 'Karteileichen ab 1 Tag'); await s.locator('[data-rsort="tageSeit"]').click(); await ruhig(s); ok('Report sortiert');
+  await s.fill('#repFilter', 'Anna'); await ruhig(s); if (!/Anna/.test(await s.textContent('#repTabelle'))) throw new Error('Filter im Report'); ok('Report gefiltert');
+  const [rc] = await Promise.all([s.waitForEvent('download'), s.click('#repCsv')]); ok('Report als CSV: ' + rc.suggestedFilename());
+  const [druck] = await Promise.all([s.waitForEvent('popup'), s.click('#repDruck')]); await druck.locator('#tab tbody tr').first().waitFor(); ok('Druckansicht (Querformat) mit Tabelle'); await bild(druck, 'b36-report-druck'); await druck.close();
+  await s.locator('[data-rziel]').first().click(); await s.waitForURL(/#person\//); ok('Klick auf Zeile öffnet die Personalakte');
+  const kat = await (await s.request.get(URL0 + '/api/reports')).json();
+  for (const r of kat) { await s.goto(URL0 + '/#report/' + r.id); await s.locator('#repTabelle table, #repTabelle .leer').first().waitFor({ timeout: 15000 }); }
+  ok('alle ' + kat.length + ' Reports in der Oberfläche geladen');
+  await s.goto(URL0 + '/#report/planungen'); await s.locator('#repTabelle').waitFor(); await s.selectOption('#repSchnell', 'jahr'); await s.locator('#repTabelle table').waitFor(); ok('Schnellwahl „dieses Jahr"'); await bild(s, 'b37-report-planungen');
+  await navKlick(s, 'controlling', 'Controlling'); const [gb] = await Promise.all([s.waitForEvent('popup'), s.click('#cBericht')]); await gb.waitForLoadState(); ok('Bericht Geschäftsführung geöffnet: ' + gb.url().replace(URL0, '')); await gb.close();
   // Handy: Menü hinter ☰, Gruppen klappen auf
   await s.setViewportSize({ width: 390, height: 844 }); await ruhig(s);
   if (await s.locator('#nav').isVisible()) throw new Error('Menü am Handy nicht eingeklappt');

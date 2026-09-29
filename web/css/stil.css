@@ -51,7 +51,7 @@ h3 { font-size: 1.05rem; font-weight: 700; }
 .punkt { width: .5rem; height: .5rem; border-radius: 50%; background: var(--gruen-400); box-shadow: 0 0 0 3px rgba(52, 211, 153, .25); }
 .kopf { position: sticky; top: 0; z-index: 20; background: rgba(2, 44, 34, .92); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); }
 .kopf .innen { display: flex; align-items: center; gap: 2rem; padding: .7rem 1.25rem; max-width: 1280px; margin: 0 auto; }
-.kopf img.logo { height: 34px; width: auto; }
+.kopf img.logo { height: 42px; width: auto; }
 .nav { display: flex; gap: .25rem; flex-wrap: wrap; }
 .nav a { color: #e6f2ec; font-weight: 700; font-size: .82rem; letter-spacing: .06em; text-transform: uppercase; padding: .55rem .8rem; border-radius: 10px; position: relative; }
 .nav a:hover { text-decoration: none; background: rgba(255,255,255,.07); }
@@ -152,7 +152,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 /* ---------- Mitarbeiter-App (Handy zuerst) ---------- */
 .app { max-width: 560px; margin: 0 auto; min-height: 100vh; background: var(--grund); }
 .app-kopf { position: sticky; top: 0; z-index: 10; background: var(--gruen-900); color: #fff; padding: .8rem 1rem; display: flex; align-items: center; gap: .8rem; border-bottom: 2px solid var(--gruen-500); }
-.app-kopf img { height: 28px; width: auto; }
+.app-kopf img { height: 34px; width: auto; }
 .app-kopf .zurueck { background: rgba(255,255,255,.1); border: 0; color: #fff; width: 40px; height: 40px; border-radius: 12px; font-size: 1.2rem; cursor: pointer; }
 .app-kopf .titel { font-weight: 800; line-height: 1.2; }
 .app-kopf .titel small { display: block; font-weight: 500; color: #b8d4c8; font-size: .78rem; }

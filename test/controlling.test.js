@@ -132,3 +132,32 @@ test('SEPA-Lastschrift pain.008: Mandat Pflicht, Datei mit FRST, danach RCUR', a
   const x2 = (await rufen('b', '/api/lastschrift', { ids: [rechnung], datum: plus(heute, 5) })).buf.toString(); assert.match(x2, /<SeqTp>RCUR<\/SeqTp>/);
   const c = (await rufen('b', '/api/controlling')).j; assert.strictEqual(c.monate.length, 12); assert.strictEqual(c.monate[11].umsatz, 1000); assert.strictEqual(c.konten.erloes, '8400');
 });
+
+test('Reports: alle laufen, Karteileichen, Minijob-Grenze, Rendite, Krankenquote, CSV, Bericht Geschäftsführung', async function () {
+  const kat = (await rufen('b', '/api/reports')).j; assert.ok(kat.length >= 30, 'nur ' + kat.length + ' Reports');
+  const von = heute.slice(0, 4) + '-01-01', bis = heute;
+  for (const r of kat) {
+    const q = r.id === 'erledigung' ? '&von=' + plus(heute, -20) + '&bis=' + heute : '&von=' + von + '&bis=' + bis;
+    const x = await rufen('b', '/api/report?id=' + r.id + q); assert.strictEqual(x.status, 200, r.id + ': ' + JSON.stringify(x.j)); assert.ok(Array.isArray(x.j.zeilen), r.id);
+    x.j.zeilen.slice(0, 3).forEach(function (z) { r.spalten.forEach(function (s) { assert.ok(!(typeof z[s.k] === 'number' && !isFinite(z[s.k])), r.id + '.' + s.k + ' ist keine Zahl'); }); });
+  }
+  // Karteileichen: Kraft ohne Einsatz
+  const lz = (await rufen('b', '/api/mitarbeiter', { name: 'Nie Da' })).j.id;
+  const k = (await rufen('b', '/api/report?id=karteileichen&tage=30')).j.zeilen; assert.match(k.find(x => x.mitarbeiter_id === lz).hinweis, /noch nie eingesetzt/);
+  assert.strictEqual(k.find(x => x.mitarbeiter_id === anna).tageSeit <= 31, true);
+  // Minijob über der Grenze: 45 Stunden × 16 € = 720 € > 603 €
+  await rufen('b', '/api/personal', { id: anna, beschaeftigungsart: 'minijob' });
+  const m = heute.slice(0, 7); for (let i = 10; i < 17; i++) db.prepare("INSERT INTO zeitbuchung (mitarbeiter_id, objekt_id, kommen, gehen) VALUES (?, ?, ?, ?)").run(anna, objekt, m + '-' + i + ' 06:00:00', m + '-' + i + ' 11:00:00');
+  const mj = (await rufen('b', '/api/report?id=minijob&jahr=' + heute.slice(0, 4))).j.zeilen.find(x => x.mitarbeiter_id === anna);
+  assert.strictEqual(mj['m' + heute.slice(5, 7)], 720); assert.match(mj.hinweis, /überschritten/);
+  // Planungen: Rendite = DB / Lohnkosten × 100
+  const pl = (await rufen('b', '/api/report?id=planungen&von=' + m + '-01&bis=' + m + '-28')).j.zeilen.find(x => x.objekt_id === objekt);
+  assert.strictEqual(pl.lohn, 900); assert.strictEqual(pl.umsatzIst, 1000); assert.strictEqual(pl.rendite, Math.round((1000 - 900) / 900 * 1000) / 10);
+  // Krankenquote
+  db.prepare("INSERT INTO abwesenheit (mitarbeiter_id, von, bis, art) VALUES (?, ?, ?, 'krank')").run(anna, m + '-01', m + '-01');
+  assert.ok((await rufen('b', '/api/report?id=krankenquote&von=' + m + '-01&bis=' + m + '-28')).j.zeilen.find(x => x.mitarbeiter_id === anna).krank >= 0);
+  const csv = (await rufen('b', '/api/report.csv?id=telefonliste')).buf.toString(); assert.match(csv, /^﻿Mitarbeiter;Telefon;E-Mail/);
+  assert.strictEqual((await rufen('b', '/api/report?id=erledigung&von=2026-01-01&bis=2026-06-30')).status, 400);   // mehr als 62 Tage
+  assert.strictEqual((await rufen('b', '/api/report?id=gibtsnicht')).status, 400);
+  const gb = await rufen('b', '/api/bericht/geschaeftsfuehrung?monat=' + m); assert.strictEqual(gb.typ, 'application/pdf'); assert.ok(gb.buf.length > 20000);
+});

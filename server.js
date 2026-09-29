@@ -44,6 +44,8 @@ BW.tabellen(db);
 const AUSW = require('./lib/auswertung');
 const CTRL = require('./lib/controlling');
 CTRL.tabellen(db);
+db.exec("CREATE TABLE IF NOT EXISTS anmeldung_log (id INTEGER PRIMARY KEY, rolle TEXT, wer_id INTEGER, name TEXT, zeit TEXT DEFAULT (datetime('now','localtime')))");
+const REP = require('./lib/reports');
 if (process.env.STAFFCLEAN_DEMO !== '0' && DEMO.anlegen(db)) console.log('Beispieldaten angelegt.');
 
 const heute = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -140,6 +142,7 @@ async function oeffentlich(req, res, p, q) {
     if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
     const u = db.prepare('SELECT * FROM benutzer WHERE email = ? AND aktiv = 1').get(email);
     if (!u || !Z.pruefen(b.passwort || '', u.pw)) { Z.fehlversuch(db, schl); throw new Fehler(401, 'E-Mail oder Passwort stimmt nicht.'); }
+    db.prepare('INSERT INTO anmeldung_log (rolle, wer_id, name) VALUES (?,?,?)').run(u.rolle, u.id, u.name);
     const s = Z.sitzungAnlegen(db, u.rolle, u.id); return json(res, 200, { ok: true, rolle: u.rolle }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
   }
   if (p === '/api/app/personen') return json(res, 200, db.prepare("SELECT id, name FROM mitarbeiter WHERE aktiv = 1 AND pin IS NOT NULL AND pin <> '' ORDER BY name").all());
@@ -148,6 +151,7 @@ async function oeffentlich(req, res, p, q) {
     if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
     const m = db.prepare('SELECT * FROM mitarbeiter WHERE id = ? AND aktiv = 1').get(Number(b.mitarbeiter_id));
     if (!m || !m.pin || !Z.pruefen(String(b.pin || ''), m.pin)) { Z.fehlversuch(db, schl); throw new Fehler(401, 'PIN stimmt nicht.'); }
+    db.prepare("INSERT INTO anmeldung_log (rolle, wer_id, name) VALUES ('mitarbeiter',?,?)").run(m.id, m.name);
     const s = Z.sitzungAnlegen(db, 'mitarbeiter', null, m.id); return json(res, 200, { ok: true, name: m.name, sprache: m.sprache }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
   }
   if (p === '/api/abmelden' && req.method === 'POST') { const w = Z.wer(db, req); if (w) db.prepare('DELETE FROM sitzung WHERE token = ?').run(w.token); return json(res, 200, { ok: true }, { 'Set-Cookie': Z.keksWeg }); }
@@ -813,6 +817,19 @@ async function bueroApi(req, res, p, q, ich) {
     db.prepare('UPDATE kunde SET debitor_konto = ?, sepa_iban = ?, sepa_bic = ?, mandatsreferenz = ?, mandat_datum = ?, lastschrift = ? WHERE id = ?').run(b.debitor_konto || null, ib, String(b.sepa_bic || '').trim().toUpperCase() || null, String(b.mandatsreferenz || '').trim() || null, b.mandat_datum || null, art, k.id);
     return json(res, 200, { ok: true });
   }
+  // --- Controlling-Reports (Katalog wie in der Sicherheitsplanung)
+  if (p === '/api/reports') return json(res, 200, REP.katalog());
+  if (p === '/api/report' || p === '/api/report.csv') {
+    const par = {}; q.forEach(function (v, k) { if (k !== 'id') par[k] = v; });
+    let e; try { e = REP.ausfuehren(db, q.get('id'), par); } catch (x) { throw new Fehler(400, x.message); }
+    if (p === '/api/report') return json(res, 200, e);
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + e.titel.replace(/[^A-Za-zÄÖÜäöüß0-9]+/g, '_') + '_' + heute() + '.csv"', 'Cache-Control': 'no-store' }); return res.end(REP.csv(e));
+  }
+  if (p === '/api/bericht/geschaeftsfuehrung') {
+    const m = q.get('monat') || heute().slice(0, 7); if (!/^\d{4}-\d{2}$/.test(m)) throw new Fehler(400, 'Monat im Format JJJJ-MM');
+    const buf = await BRIEF.geschaeftsbericht(db, m);
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="Bericht_Geschaeftsfuehrung_' + m + '.pdf"', 'Cache-Control': 'no-store' }); return res.end(buf);
+  }
   // --- Stammdaten: Kunden, Konten, Tarife, Einstellungen
   if (p === '/api/kunden' && req.method === 'GET') return json(res, 200, db.prepare('SELECT k.*, (SELECT COUNT(*) FROM objekt o WHERE o.kunde_id = k.id) objekte, (SELECT COUNT(*) FROM benutzer b WHERE b.kunde_id = k.id) zugaenge FROM kunde k ORDER BY k.name').all());
   if (p === '/api/kunde' && req.method === 'POST') {
@@ -857,7 +874,7 @@ function fotoErlaubt(ich, datei) {
   return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id);
 }
 
-const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
+const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/report': 'drucken-report.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
 
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://x'); const p = u.pathname, q = u.searchParams;

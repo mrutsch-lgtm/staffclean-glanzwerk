@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report · StaffClean</title>
+<link rel="icon" href="/bilder/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="stylesheet" href="/css/stil.css">
+<style>@page { size: A4 landscape; margin: 12mm 10mm; } body { background: #fff; } .tabelle td, .tabelle th { font-size: .78rem; padding: .35rem .45rem; } .druck { max-width: none; }</style>
+</head>
+<body>
+<div class="druck">
+  <div class="briefkopf"><img src="/bilder/logo-dunkel.webp" alt="StaffClean"><div style="text-align:right"><div class="ueberzeile">Controlling-Report</div><div id="datum" class="klein"></div></div></div>
+  <h1 id="titel" style="color:var(--gruen-900);font-size:1.6rem;margin:.2rem 0">…</h1>
+  <p class="leise klein" id="text"></p>
+  <table class="tabelle" id="tab"></table>
+  <p class="leise klein" id="fuss"></p>
+  <button class="knopf druckknopf" onclick="window.print()">Drucken / als PDF speichern</button>
+</div>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { esc, datumDe, holen } = UI;
+  const q = new URLSearchParams(location.search), e = await holen('/api/report?' + q.toString());
+  const euro = v => (Number(v) || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }), z = v => String(Math.round(v * 100) / 100).replace('.', ',');
+  const wert = (s, v) => v == null || v === '' ? '' : s.typ === 'euro' ? euro(v) : s.typ === 'std' ? z(v) : s.typ === 'prozent' ? z(v) + ' %' : s.typ === 'datum' && /^\d{4}-\d{2}-\d{2}/.test(v) ? datumDe(v.slice(0, 10)) : esc(v);
+  document.title = e.titel + ' · StaffClean';
+  document.getElementById('titel').textContent = e.titel;
+  const p = e.parameter; document.getElementById('text').textContent = e.text + (p.von ? ' · Zeitraum ' + datumDe(p.von) + ' – ' + datumDe(p.bis) : '') + (p.jahr && !p.von ? ' · Jahr ' + p.jahr : '') + (p.tage ? ' · ' + p.tage + ' Tage' : '');
+  document.getElementById('datum').textContent = 'erstellt ' + datumDe(new Date().toISOString().slice(0, 10));
+  document.getElementById('tab').innerHTML = '<thead><tr>' + e.spalten.map(function (s) { return '<th' + (['euro', 'std', 'prozent', 'zahl'].indexOf(s.typ) >= 0 ? ' style="text-align:right"' : '') + '>' + esc(s.t) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    e.zeilen.map(function (r) { return '<tr>' + e.spalten.map(function (s) { return '<td' + (['euro', 'std', 'prozent', 'zahl'].indexOf(s.typ) >= 0 ? ' style="text-align:right"' : '') + '>' + wert(s, r[s.k]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody>';
+  document.getElementById('fuss').textContent = e.zeilen.length + ' Zeilen';
+})();
+</script>
+</body>
+</html>
