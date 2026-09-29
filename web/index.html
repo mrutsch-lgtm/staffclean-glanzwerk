@@ -17,18 +17,18 @@
 </div></div>
 <header class="kopf"><div class="innen">
   <a href="#uebersicht"><img class="logo" src="/bilder/glanzwerk-logo-hell.png" alt="Glanzwerk"></a>
+  <button class="nav-knopf" id="navKnopf" type="button" aria-label="Menü" aria-expanded="false">☰</button>
   <nav class="nav" id="nav">
     <a href="#uebersicht" data-v="uebersicht">Übersicht</a>
-    <a href="#dienstplan" data-v="dienstplan">Dienstplan</a>
-    <a href="#objekte" data-v="objekte">Objekte</a>
-    <a href="#tagesplan" data-v="tagesplan">Tagesplan</a>
-    <a href="#einsatz" data-v="einsatz">Einsatz</a>
-    <a href="#qualitaet" data-v="qualitaet">Qualität</a>
-    <a href="#zeiten" data-v="zeiten">Zeiten &amp; Lohn</a>
-    <a href="#abrechnung" data-v="abrechnung">Abrechnung</a>
-    <a href="#mitarbeiter" data-v="mitarbeiter">Personal</a>
-    <a href="#kunden" data-v="kunden">Kunden</a>
-    <a href="#maengel" data-v="maengel">Mängel</a>
+    <div class="menue"><button type="button">Planung</button><div class="unter">
+      <a href="#dienstplan" data-v="dienstplan">Dienstplan</a><a href="#tagesplan" data-v="tagesplan">Tagesplan</a><a href="#einsatz" data-v="einsatz">Einsatz &amp; Vertretung</a></div></div>
+    <div class="menue"><button type="button">Objekte</button><div class="unter">
+      <a href="#objekte" data-v="objekte">Alle Objekte</a><a href="#objektauswertung" data-v="objektauswertung">Objektauswertung</a><a href="#qualitaet" data-v="qualitaet">Qualität &amp; Prüfungen</a><a href="#maengel" data-v="maengel">Mängel</a><a href="#import" data-v="import">Leistungsverzeichnis einlesen</a></div></div>
+    <div class="menue"><button type="button">Personal</button><div class="unter">
+      <a href="#mitarbeiter/liste" data-v="mitarbeiter">Mitarbeiter</a><a href="#bewerber" data-v="bewerber">Bewerber</a><a href="#zeiten" data-v="zeiten">Zeiten &amp; Lohn</a><a href="#mitarbeiter/fristen" data-v="mitarbeiter-fristen">Fristen &amp; Lücken</a><a href="/api/personal/fragebogen" target="_blank" data-v="fragebogen">Personalfragebogen (leer)</a></div></div>
+    <div class="menue"><button type="button">Kunden &amp; Finanzen</button><div class="unter">
+      <a href="#kunden" data-v="kunden">Kunden &amp; Zugänge</a><a href="#abrechnung/uebersicht" data-v="abrechnung">Rechnungen</a><a href="#abrechnung/op" data-v="abrechnung-op">Offene Posten &amp; Mahnwesen</a><a href="#abrechnung/auftraege" data-v="abrechnung-auftraege">Sonderleistungen</a><a href="#abrechnung/artikel" data-v="abrechnung-artikel">Artikel &amp; Leistungen</a></div></div>
+    <a href="#controlling" data-v="controlling">Controlling</a>
     <a href="#planner" data-v="planner">Planner</a>
     <a href="#stammdaten" data-v="stammdaten">Stammdaten</a>
   </nav>
@@ -41,6 +41,8 @@
 <script src="/js/buero-abrechnung.js"></script>
 <script src="/js/buero-personal.js"></script>
 <script src="/js/buero-objekt.js"></script>
+<script src="/js/buero-bewerber.js"></script>
+<script src="/js/buero-controlling.js"></script>
 <script src="/js/buero-planner.js"></script>
 <script src="/js/komm.js"></script>
 </body>

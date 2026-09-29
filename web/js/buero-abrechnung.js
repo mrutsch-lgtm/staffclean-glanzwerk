@@ -20,7 +20,8 @@
   const fehler = fn => async function () { try { await fn.apply(this, arguments); } catch (e) { meldung(e.message); } };
 
   let reiterAb = 'uebersicht', filter = { status: 'alle', kunde: '', suche: '', jahr: '' };
-  A.abrechnung = async function abrechnung() {
+  A.abrechnung = async function abrechnung(arg) {
+    if (arg && ['uebersicht', 'op', 'mahnungen', 'artikel', 'automatik', 'auftraege', 'einstellungen'].indexOf(arg) >= 0) reiterAb = arg;
     G.kopf('Abrechnung', 'Rechnungen, die <span class="akzent">stimmen</span>', 'Rechnungen frei schreiben oder per Abrechnungslauf aus den Objekten erzeugen — pauschal, nach Ist-Stunden, mit Artikeln, Sonderleistungen und Nachlässen. Gestellte Rechnungen sind nummeriert und unveränderlich (ZUGFeRD / XRechnung). Zahlungen, offene Posten und Mahnwesen an einem Ort.',
       '<button class="knopf gold" id="neuRechnung">+ Neue Rechnung</button><button class="knopf hell" id="zuMahnlauf">Mahnlauf</button>');
     inhalt.innerHTML = G.reiter([['uebersicht', 'Rechnungen'], ['op', 'Offene Posten & Mahnwesen'], ['mahnungen', 'Mahnungen'], ['artikel', 'Artikel & Leistungen'], ['automatik', 'Automatik'], ['auftraege', 'Sonderleistungen & Abrufe'], ['einstellungen', 'Einstellungen']], reiterAb, function (r) { reiterAb = r; laden(); }) + '<div id="abBereich"></div>';

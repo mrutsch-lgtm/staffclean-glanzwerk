@@ -128,11 +128,12 @@
     $('#bearbeiten').onclick = function () { objektFormular(o); };
     $('#ruhen').onclick = async function () { await holen('/api/objekt/status', { id: o.id, status: o.status === 'aktiv' ? 'ruht' : 'aktiv' }); objekteCache = null; meldung('Status geändert'); route(); };
     // Objektkopf wie in der Sicherheitsplanung: oben alles auf einen Blick, darunter die Details in Reitern
-    inhalt.innerHTML = window.GW_OBJEKT.kopf(o, kz) + reiter([['akte', 'Objektakte'], ['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['team', 'Team, Mängel, Prüfungen'], ['standort', 'Standort & QR'], ['rechnungen', 'Rechnungen (' + kz.rechnungen.length + ')']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
+    inhalt.innerHTML = window.GW_OBJEKT.kopf(o, kz) + reiter([['akte', 'Objektakte'], ['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['team', 'Team, Mängel, Prüfungen'], ['standort', 'Standort & QR'], ['auswertung', 'Auswertung'], ['rechnungen', 'Rechnungen (' + kz.rechnungen.length + ')']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
     const bereich = $('#oBereich');
     async function zeigen() {
       if (objektReiter === 'akte') return window.GW_OBJEKT.akte(o, kz, bereich);
       if (objektReiter === 'rechnungen') return window.GW_OBJEKT.rechnungen(o, kz, bereich);
+      if (objektReiter === 'auswertung') return window.GW_OBJEKT.auswertung(o, kz, bereich);
       if (objektReiter === 'lv') return lvRaster(o, bereich);
       if (objektReiter === 'woche') return wocheObjekt(o, bereich);
       if (objektReiter === 'kalk') return kalkulation(o, bereich);
@@ -479,6 +480,7 @@
   function schubladeZu() { $('#schublade').hidden = true; }
   $('#schublade').onclick = function (e) { if (e.target.id === 'schublade') schubladeZu(); };
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') schubladeZu(); });
+  $('#navKnopf').onclick = function () { const o = $('#nav').classList.toggle('offen'); this.setAttribute('aria-expanded', o ? 'true' : 'false'); };
   $('#abmelden').onclick = async function () { await holen('/api/abmelden', {}); location.href = '/anmelden'; };
 
   const ANSICHT = { uebersicht, dienstplan, objekte, objekt, tagesplan, import: lvImport, einsatz, qualitaet, pruefung, zeiten, kunden, maengel, stammdaten };
@@ -486,8 +488,13 @@
   window.GW = { kopf, feld, auswahl, formDaten, knoepfe, reiter, schublade, schubladeZu, objekteListe, euro, std, route, TAGE, SPRACHEN, bausteine, inhalt: inhalt, titel: titel, objekteNeu: function () { objekteCache = null; } };
   async function route() {
     const [v, arg] = (location.hash.slice(1) || 'uebersicht').split('/');
-    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung', mahnung: 'abrechnung', person: 'mitarbeiter', board: 'planner' }[v] || v;
-    $$('#nav a').forEach(function (a) { a.classList.toggle('aktiv', a.dataset.v === nav); });
+    const nav = { objekt: 'objekte', import: 'objekte', pruefung: 'qualitaet', rechnung: 'abrechnung', mahnung: 'abrechnung', person: 'mitarbeiter', board: 'planner', kandidat: 'bewerber' }[v] || v;
+    // Unterziel (z. B. #abrechnung/op) hat einen eigenen Menüpunkt → der ist aktiv, sonst der Hauptpunkt
+    const genau = arg && document.querySelector('#nav a[data-v="' + v + '-' + arg + '"]') ? v + '-' + arg : nav;
+    $$('#nav a').forEach(function (a) { a.classList.toggle('aktiv', a.dataset.v === genau); });
+    $$('#nav .menue').forEach(function (m) { m.classList.toggle('aktiv', !!m.querySelector('a.aktiv')); });
+    if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#nav')) document.activeElement.blur();   // Dropdown schließt nach der Wahl
+    $('#nav').classList.remove('offen'); $('#navKnopf').setAttribute('aria-expanded', 'false');
     schubladeZu();
     const modul = window.GW_ANSICHTEN || {};
     try { await (modul[v] || ANSICHT[v] || uebersicht)(arg); } catch (e) { if (/anmelden/i.test(e.message)) { location.href = '/anmelden'; return; } inhalt.innerHTML = '<div class="karte hinweis">' + esc(e.message) + '</div>'; }

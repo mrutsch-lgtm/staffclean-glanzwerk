@@ -31,6 +31,11 @@ async function beobachten(seite, name) {
 async function bild(seite, n) { if (process.env.OHNE_BILDER) return; await seite.waitForTimeout(350); await seite.screenshot({ path: path.join(BILDER, n + '.png'), fullPage: true }); }
 async function ruhig(seite) { await seite.waitForLoadState('networkidle').catch(() => {}); await seite.waitForTimeout(250); }
 async function klick(seite, sel, text) { await seite.locator(sel).first().click(); await ruhig(seite); ok(text || sel); }
+async function navKlick(seite, v, text) {
+  const a = seite.locator('#nav a[data-v="' + v + '"]').first();
+  if (!(await a.isVisible())) { const k = seite.locator('#navKnopf'); if (await k.isVisible() && !(await seite.locator('#nav').isVisible())) await k.click(); const m = a.locator('xpath=ancestor::div[contains(@class,"menue")][1]/button'); if (await m.count()) await m.click(); }
+  await a.click(); await ruhig(seite); ok(text || v);
+}
 async function meldungIst(seite, muster, text) {
   let t = [];
   for (let i = 0; i < 60; i++) { t = await seite.evaluate(() => window.__m || []); if (t.some(x => muster.test(x))) break; await seite.waitForTimeout(125); }
@@ -87,7 +92,7 @@ async function buero1(b) {
   await s.click('button[type=submit]'); await s.waitForURL(URL0 + '/'); await ruhig(s); ok('Erstes Büro-Konto angelegt, angemeldet');
   await bild(s, 'b01-uebersicht');
   // Kunden + Portal-Zugang
-  await klick(s, '#nav a[data-v=kunden]', 'Kunden öffnen'); await klick(s, '#neuKunde', '+ Kunde');
+  await navKlick(s, 'kunden', 'Kunden öffnen'); await klick(s, '#neuKunde', '+ Kunde');
   await schublade(s, { name: 'Testkunde Abnahme GmbH', ansprechpartner: 'Frau Prüf', email: 'kunde@abnahme.test', ort: 'Kiel' }); await meldungIst(s, /Gespeichert/, 'Kunde speichern');
   const karte = s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' });
   await karte.locator('[data-zugang]').click(); await schublade(s, { name: 'Frau Prüf', email: 'kunde@abnahme.test', passwort: 'Kunde-Abnahme-1' }, '#speichern'); await meldungIst(s, /Zugang angelegt/, 'Portal-Zugang anlegen');
@@ -96,7 +101,7 @@ async function buero1(b) {
   await s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' }).locator('[data-kunde]').click(); await schublade(s, { telefon: '0431 000' }); await meldungIst(s, /Gespeichert/, 'Kunde bearbeiten');
   await bild(s, 'b02-kunden');
   // Objekt anlegen
-  await klick(s, '#nav a[data-v=objekte]', 'Objekte öffnen'); await klick(s, '#neuObjekt', '+ Objekt');
+  await navKlick(s, 'objekte', 'Objekte öffnen'); await klick(s, '#neuObjekt', '+ Objekt');
   const kid = await s.locator('#schublade [name=kunde_id] option', { hasText: 'Testkunde' }).getAttribute('value');
   await schublade(s, { name: 'Abnahme-Objekt Kiel', kunde_id: kid, strasse: 'Prüfweg 1', plz: '24103', ort: 'Kiel', bundesland: 'SH', reinigungstag: '2' });
   await s.waitForURL(/#objekt\/\d+/); const oid = s.url().split('/').pop(); ok('Objekt angelegt → Objektseite ' + oid);
@@ -158,7 +163,7 @@ async function buero1(b) {
   await s.goto(URL0 + '/#objekt/' + oid); await ruhig(s); await klick(s, '#bearbeiten', 'Objekt bearbeiten'); await schublade(s, { zugang: 'Schlüssel beim Hausmeister' }); await meldungIst(s, /Objekt gespeichert/, 'Objekt speichern');
   await klick(s, '#ruhen', 'Objekt ruhen lassen'); await klick(s, '#ruhen', 'Objekt wieder aktiv');
   // Dienstplan
-  await klick(s, '#nav a[data-v=dienstplan]', 'Dienstplan öffnen'); await bild(s, 'b09-dienstplan');
+  await navKlick(s, 'dienstplan', 'Dienstplan öffnen'); await bild(s, 'b09-dienstplan');
   await klick(s, '#neuSchicht', '+ Schicht');
   const anna = await s.locator('#schublade [name=mitarbeiter_id] option', { hasText: 'Anna' }).getAttribute('value');
   await s.locator('#schublade .wt[value="6"]').check();
@@ -173,7 +178,7 @@ async function buero1(b) {
   await klick(s, '#kopieren', 'Vorwoche übernehmen'); await meldungIst(s, /übernommen/, 'Vorwoche kopiert');
   await klick(s, '#pZurueck', 'Woche zurück');
   // Tagesplan
-  await klick(s, '#nav a[data-v=tagesplan]', 'Tagesplan öffnen');
+  await navKlick(s, 'tagesplan', 'Tagesplan öffnen');
   if (await s.locator('[data-nachtragen]').count()) { await klick(s, '[data-nachtragen]', 'als erledigt nachtragen'); await meldungIst(s, /Nachgetragen/, 'Nachtragen'); await klick(s, '[data-zurueck]', 'zurücknehmen'); await meldungIst(s, /Zurückgenommen/, 'Zurücknehmen'); }
   await klick(s, '#tVor', 'Tag vor'); await klick(s, '#tZurueck', 'Tag zurück'); await s.fill('#tDatum', plus(3)); await s.dispatchEvent('#tDatum', 'change'); await ruhig(s); ok('Datum wählen'); await klick(s, '#tHeute', 'Heute'); await bild(s, 'b11-tagesplan');
   // Import
@@ -186,21 +191,21 @@ async function buero1(b) {
   await s.click('#uebernehmen'); await s.waitForURL(/#objekt\/\d+/); await ruhig(s); await klick(s, '[data-reiter="lv"]', 'Reiter Leistungsverzeichnis');
   const rt = await s.textContent('#inhalt'); if (!/30,47 m²/.test(rt)) throw new Error('Fläche nicht am Raum: ' + rt.slice(0, 400)); ok('Fläche 30,47 m² am Raum');
   await s.locator('[data-raum-edit]').first().click(); await schublade(s, { anzahl: '3' }); await meldungIst(s, /Raum gespeichert/, 'Anzahl 3 Etagen am Raum');
-  if (!/× 3/.test(await s.textContent('#inhalt'))) throw new Error('Anzahl nicht im Raster'); ok('Raster zeigt „× 3"');
+  await textDa(s, '#inhalt', /× 3/, 'Anzahl nicht im Raster'); ok('Raster zeigt „× 3"');
   await klick(s, '[data-reiter=kalk]', 'Kalkulation mit Anzahl'); if (!/ × 3/.test(await s.textContent('#inhalt'))) throw new Error('Kalkulation ohne Anzahl'); ok('Kalkulation rechnet mit „× 3"');
   // Einsatz
-  await klick(s, '#nav a[data-v=einsatz]', 'Einsatz öffnen'); await klick(s, '#neuAbw', '+ Abwesenheit');
+  await navKlick(s, 'einsatz', 'Einsatz öffnen'); await klick(s, '#neuAbw', '+ Abwesenheit');
   const piotr = await s.locator('#schublade [name=mitarbeiter_id] option', { hasText: 'Piotr' }).getAttribute('value');
   await schublade(s, { mitarbeiter_id: piotr, art: 'Urlaub', von: plus(5), bis: plus(9) }, '#speichern'); await meldungIst(s, /eingetragen/, 'Abwesenheit eintragen');
   await klick(s, '[data-vertretung]', 'Vertretung anfragen'); await s.locator('#schublade [data-anfragen]').first().click(); await ruhig(s); await meldungIst(s, /Anfrage gesendet/, 'Vertretungsanfrage senden');
   await bild(s, 'b13-einsatz');
   await klick(s, '[data-abw-weg]', 'Abwesenheit entfernen'); await meldungIst(s, /Entfernt/, 'Abwesenheit entfernt');
   // Qualität
-  await klick(s, '#nav a[data-v=qualitaet]', 'Qualität öffnen'); await klick(s, '[data-pr]', 'Prüfung aus Liste öffnen'); await s.goto(URL0 + '/#qualitaet'); await ruhig(s);
+  await navKlick(s, 'qualitaet', 'Qualität öffnen'); await klick(s, '[data-pr]', 'Prüfung aus Liste öffnen'); await s.goto(URL0 + '/#qualitaet'); await ruhig(s);
   await klick(s, '#qStart', 'Prüfung starten (Demo-Objekt)'); await s.waitForURL(/#pruefung\//); await bild(s, 'b14-qualitaet');
   // Mitarbeiter
   // Personal: Liste, neue Kraft, Personalakte (Prüfziffern), Dokumente, Abwesenheit, Einsätze, App-Zugang, Auswertungen
-  await klick(s, '#nav a[data-v=mitarbeiter]', 'Personal öffnen'); await klick(s, '#neuMa', '+ Mitarbeiter');
+  await navKlick(s, 'mitarbeiter', 'Personal öffnen'); await klick(s, '#neuMa', '+ Mitarbeiter');
   await schublade(s, { vorname: 'Test', nachname: 'Kraft', sprache: 'ro', pin: '4321' }, '#speichern'); await meldungIst(s, /Angelegt/, 'Mitarbeiter mit PIN anlegen');
   await s.waitForURL(/#person\/\d+/); await ruhig(s); ok('Personalakte geöffnet');
   if (!/Für die Anmeldung beim Lohnbüro fehlen/.test(await s.textContent('#inhalt'))) throw new Error('Lückenhinweis fehlt'); ok('Akte zeigt fehlende Pflichtangaben');
@@ -220,12 +225,12 @@ async function buero1(b) {
   await klick(s, '#paNachricht', 'Nachricht an die Kraft'); await s.locator('#kommPanel').waitFor({ state: 'visible' }); await s.fill('#kommText', 'Willkommen im Team (Abnahme)'); await klick(s, '#kommSenden', 'Direktnachricht senden');
   if (!/Willkommen im Team/.test(await s.textContent('#kommVerlauf'))) throw new Error('Direktnachricht nicht im Verlauf'); ok('Direktnachricht im Verlauf'); await s.click('#kommZu');
   await bild(s, 'b15-personalakte');
-  await klick(s, '#nav a[data-v=mitarbeiter]', 'Personal-Liste'); await s.fill('#pSuche', 'Kraft'); await ruhig(s); ok('Personal durchsuchen'); await s.selectOption('#pStatus', 'alle'); await ruhig(s); ok('Status-Filter');
+  await navKlick(s, 'mitarbeiter', 'Personal-Liste'); await s.fill('#pSuche', 'Kraft'); await ruhig(s); ok('Personal durchsuchen'); await s.selectOption('#pStatus', 'alle'); await ruhig(s); ok('Status-Filter');
   await klick(s, '[data-reiter=fristen]', 'Fristen & Lücken'); await klick(s, '[data-reiter=auswertung]', 'Monatsauswertung'); await s.locator('#awTabelle table').waitFor(); ok('Monatsauswertung mit Tabelle');
   await klick(s, '#awCsv', 'Auswertung als CSV'); await klick(s, '[data-reiter=urlaub]', 'Urlaubskonten'); await klick(s, '[data-person]', 'Akte aus Urlaubskonto öffnen'); await s.waitForURL(/#person\//); ok('Personalakte über Liste');
   await bild(s, 'b15-mitarbeiter');
   // Stammdaten
-  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten öffnen');
+  await navKlick(s, 'stammdaten', 'Stammdaten öffnen');
   await klick(s, '#katalog', 'Standardkatalog übernehmen'); await meldungIst(s, /Katalog: \d+ neu/, 'Standardkatalog geladen');
   if (!/Glasreinigung inkl\. Rahmen/.test(await s.textContent('#sBereich'))) throw new Error('Katalog nicht in der Liste'); ok('Katalog-Tätigkeiten mit Beschreibung sichtbar');
   await klick(s, '[data-t]', 'Tätigkeit bearbeiten');
@@ -291,7 +296,7 @@ async function kunde(b, oid) {
   await klick(s, '#anfragen', 'Sonderleistung anfragen'); await s.fill('#atext', 'Grundreinigung Flur nach Umbau (Abnahme)'); await s.fill('#adatum', plus(2));
   await klick(s, '#asenden', 'Anfrage senden'); await meldungIst(s, /Anfrage ist bei uns eingegangen/, 'Anfrage gesendet');
   if (!/Grundreinigung Flur[\s\S]*angefragt/.test(await s.textContent('#inhalt'))) throw new Error('Anfrage nicht in „Ihre Anfragen"'); ok('Anfrage steht mit Status „angefragt" im Portal');
-  await klick(s, '#nav a[data-v=rechnungen]', 'Rechnungen (noch leer)'); if (!/Noch keine Rechnungen/.test(await s.textContent('#inhalt'))) throw new Error('Rechnungsliste nicht leer'); ok('noch keine Rechnung sichtbar');
+  await navKlick(s, 'rechnungen', 'Rechnungen (noch leer)'); if (!/Noch keine Rechnungen/.test(await s.textContent('#inhalt'))) throw new Error('Rechnungsliste nicht leer'); ok('noch keine Rechnung sichtbar');
   await klick(s, '#abmelden', 'Kunde abmelden'); await s.waitForURL(/anmelden/); ok('abgemeldet → /anmelden');
   await ctx.close();
 }
@@ -300,7 +305,7 @@ async function abrechnen(b) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Abrechnung');
   await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
   // Anfrage aus dem Portal bestätigen, einplanen, erledigen
-  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung öffnen'); await klick(s, '[data-reiter=auftraege]', 'Reiter Sonderleistungen');
+  await navKlick(s, 'abrechnung', 'Abrechnung öffnen'); await klick(s, '[data-reiter=auftraege]', 'Reiter Sonderleistungen');
   const karte = () => s.locator('.karte', { hasText: 'Grundreinigung Flur' });
   if (!/vom Kunden/.test(await karte().textContent())) throw new Error('Kundenanfrage fehlt im Büro'); ok('Kundenanfrage im Büro angekommen');
   await karte().locator('[data-best]').click(); const anna = await s.locator('#schublade [name=mitarbeiter_id] option', { hasText: 'Anna' }).getAttribute('value');
@@ -311,9 +316,9 @@ async function abrechnen(b) {
   await s.locator('.karte', { hasText: 'Fensterbänke Keller' }).locator('[data-erl]').click(); await schublade(s, {}, '#speichern'); await meldungIst(s, /nächste Rechnung/, 'Festpreis-Leistung erledigt');
   await bild(s, 'b22-sonderleistungen');
   // Stundensatz fehlt noch → Hinweis beim Erzeugen; danach eintragen
-  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen'); await s.fill('[name=stundensatz_abruf]', '35'); await klick(s, '#eSpeichern', 'Stundensatz 35 € speichern'); await meldungIst(s, /gespeichert/, 'Stundensatz gespeichert');
+  await navKlick(s, 'stammdaten', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen'); await s.fill('[name=stundensatz_abruf]', '35'); await klick(s, '#eSpeichern', 'Stundensatz 35 € speichern'); await meldungIst(s, /gespeichert/, 'Stundensatz gespeichert');
   // Entwürfe für den laufenden Monat
-  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=uebersicht]', 'Reiter Rechnungen'); await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erzeugen');
+  await navKlick(s, 'abrechnung', 'Abrechnung'); await klick(s, '[data-reiter=uebersicht]', 'Reiter Rechnungen'); await s.fill('#abMonat', plus(0).slice(0, 7)); await klick(s, '#abErzeugen', 'Entwürfe erzeugen');
   await meldungIst(s, /Entwürfe angelegt/, 'Entwürfe erzeugt'); if (await s.locator('#schublade').isVisible()) { ok('Übersprungene Objekte mit Grund angezeigt'); await s.click('#schublade #abbrechen'); }
   await s.locator('tr[data-re]', { hasText: 'Abnahme-Objekt Kiel' }).first().click(); await s.waitForURL(/#rechnung\//); await ruhig(s);
   let t = await s.textContent('#inhalt');
@@ -328,10 +333,10 @@ async function abrechnen(b) {
   erwartet(); await klick(s, '#reStellen', 'Stellen ohne Pflichtangaben'); await meldungIst(s, /Pflichtangaben fehlen/, 'Stellen ohne Pflichtangaben blockiert');
   // Pflichtangaben nachtragen: eigene Firma + Kundenanschrift
   const rurl = s.url();
-  await klick(s, '#nav a[data-v=stammdaten]', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen');
+  await navKlick(s, 'stammdaten', 'Stammdaten'); await klick(s, '[data-reiter=einstellungen]', 'Einstellungen');
   for (const [n, v] of [['firma_strasse', 'Prüfstraße 2'], ['firma_plz', '24534'], ['firma_ort', 'Neumünster'], ['firma_email', 'rechnung@abnahme.test'], ['steuernummer', '00/000/00000'], ['iban', 'DE02 1203 0000 0000 2020 51'], ['bank', 'Abnahmebank'], ['geschaeftsfuehrung', 'Test Geschäftsführung']]) await s.fill('[name=' + n + ']', v);
   await klick(s, '#eSpeichern', 'Rechnungsangaben speichern'); await meldungIst(s, /gespeichert/, 'Firmenangaben gespeichert');
-  await klick(s, '#nav a[data-v=kunden]', 'Kunden'); await s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' }).locator('[data-kunde]').click();
+  await navKlick(s, 'kunden', 'Kunden'); await s.locator('.karte', { hasText: 'Testkunde Abnahme GmbH' }).locator('[data-kunde]').click();
   await schublade(s, { anschrift: 'Kundenweg 5', plz: '24103', kundennummer: 'K-1001', leitweg_id: '', rechnungsformat: 'zugferd', zahlungsziel_tage: '21' }); await meldungIst(s, /Gespeichert/, 'Kundenanschrift + Kundennummer');
   await s.goto(rurl); await ruhig(s); if (/Pflichtangaben/.test(await s.textContent('#inhalt'))) throw new Error('Pflichtangaben-Warnung bleibt'); ok('Pflichtangaben vollständig');
   const vorschau = await pdfPruefen(s, await s.getAttribute('#rePdf', 'href'), 'b23b-rechnung-entwurf.pdf');
@@ -372,14 +377,14 @@ async function abrechnen(b) {
   await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/);
   // Kunde sieht Rechnungen, kann ansehen und XRechnung laden
   await s.fill('[name=email]', 'kunde@abnahme.test'); await s.fill('[name=passwort]', 'Kunde-Abnahme-1'); await s.click('#los'); await s.waitForURL(/\/kunde/); await ruhig(s);
-  await klick(s, '#nav a[data-v=rechnungen]', 'Kunde: Rechnungen'); const kt = await s.textContent('#inhalt');
+  await navKlick(s, 'rechnungen', 'Kunde: Rechnungen'); const kt = await s.textContent('#inhalt');
   if (!/0001/.test(kt) || !/0002/.test(kt) || !/0003/.test(kt)) throw new Error('Kunde sieht nicht alle drei Belege'); ok('Kunde sieht Rechnung, Storno und neue Rechnung'); await bild(s, 'k04-rechnungen');
   const kp = await pdfPruefen(s, await s.locator('tr', { hasText: '0003' }).locator('a[href^="/api/kunde/rechnung-pdf"]').getAttribute('href'));
   if (!kp.xml || !/Prüfstraße 2/.test(kp.xml)) throw new Error('Kunde: Rechnungs-PDF unvollständig'); ok('Kunde öffnet das Rechnungs-PDF mit ZUGFeRD-Daten');
   const fremd = await s.request.get(URL0 + '/api/rechnung/pdf?id=1'); if (fremd.status() !== 403) throw new Error('Kunde erreicht Büro-PDF: ' + fremd.status()); ok('Kunde kommt nicht an die Büro-PDF-Schnittstelle (403)');
   const [kx] = await Promise.all([s.waitForEvent('download'), s.locator('tr', { hasText: '0003' }).locator('a[href^="/api/kunde/xrechnung"]').click()]); ok('Kunde lädt XRechnung: ' + kx.suggestedFilename());
   const firma = await s.request.get(URL0 + '/api/kunde/firma'); const fj = await firma.json(); if ('gewinn_prozent' in fj || 'lohnnebenkosten_prozent' in fj) throw new Error('Kunde sieht Kalkulationswerte'); ok('Kunde sieht keine Kalkulationswerte');
-  await klick(s, '#nav a[data-v=uebersicht]', 'Meine Objekte'); await s.locator('[data-o]').first().click(); await ruhig(s);
+  await navKlick(s, 'uebersicht', 'Meine Objekte'); await s.locator('[data-o]').first().click(); await ruhig(s);
   if (!/Grundreinigung Flur[\s\S]*erledigt/.test(await s.textContent('#inhalt'))) throw new Error('Anfrage im Portal nicht erledigt'); ok('Portal: Anfrage steht auf „erledigt"');
   await ctx.close();
 }
@@ -388,7 +393,7 @@ async function buero2(b) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Büro');
   await s.goto(URL0 + '/'); await s.waitForURL(/anmelden/); ok('ohne Sitzung → /anmelden');
   await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s); ok('Büro angemeldet');
-  await klick(s, '#nav a[data-v=zeiten]', 'Zeiten & Lohn öffnen');
+  await navKlick(s, 'zeiten', 'Zeiten & Lohn öffnen');
   if (!(await s.locator('[data-korr]').count())) throw new Error('Stempelung aus der App fehlt in Zeiten'); ok('Stempelung aus der App sichtbar'); await bild(s, 'b17-zeiten');
   await s.locator('[data-korr]').first().click(); await schublade(s, { kommen: '06:00', gehen: '08:30', pause: '0' }, '#speichern'); await meldungIst(s, /Korrigiert/, 'Zeit korrigieren');
   const [csv] = await Promise.all([s.waitForEvent('download'), s.click('a[href^="/api/zeiten.csv"]')]); if (!/Arbeitszeiten_/.test(csv.suggestedFilename())) throw new Error('CSV-Name'); ok('CSV herunterladen: ' + csv.suggestedFilename());
@@ -397,14 +402,14 @@ async function buero2(b) {
   const [dat] = await Promise.all([s.waitForEvent('download'), s.click('a[href^="/api/datev?monat="]')]); const dp = path.join(DATEN, 'datev.csv'); await dat.saveAs(dp);
   const inhalt = fs.readFileSync(dp, 'utf8'); if (!/^\uFEFF?Beraternummer;Mandantennummer/.test(inhalt) || !/12345;678;\d\d\/\d{4};1001;Anna Beispiel;1000;2,50/.test(inhalt)) throw new Error('DATEV-Datei unerwartet:\n' + inhalt); ok('DATEV-Datei: Anna 2,50 Std. Lohnart 1000, Berater 12345 / Mandant 678');
   await s.fill('#zVon', plus(-40)); await klick(s, '#zLaden', 'Zeitraum ändern');
-  await klick(s, '#nav a[data-v=maengel]', 'Mängel öffnen'); const vorher = await s.locator('[data-erledigt]').count();
+  await navKlick(s, 'maengel', 'Mängel öffnen'); const vorher = await s.locator('[data-erledigt]').count();
   const txt = await s.textContent('#inhalt'); if (!/Reklamation/.test(txt) || !/Seifenspender/.test(txt) || !/Prüfung/.test(txt)) throw new Error('Mängel aus App/Kunde/Prüfung fehlen'); ok(vorher + ' Mängel: aus App, Kundenportal und Prüfung'); await bild(s, 'b20-maengel');
   await klick(s, '[data-erledigt]', 'Mangel erledigen'); if (await s.locator('[data-erledigt]').count() !== vorher - 1) throw new Error('Mangel nicht erledigt'); ok('Mangel erledigt');
-  await klick(s, '#nav a[data-v=uebersicht]', 'Übersicht'); await klick(s, '#nav a[data-v=einsatz]', 'Einsatz (nach Zusage)');
+  await navKlick(s, 'uebersicht', 'Übersicht'); await navKlick(s, 'einsatz', 'Einsatz (nach Zusage)');
   // Einsatzplan rechnet die Auslastung aller Objekte — auf den fertigen Inhalt warten statt einmal zu lesen
   try { await s.locator('#inhalt', { hasText: 'zugesagt' }).waitFor({ timeout: 8000 }); } catch (e) { throw new Error('Zusage aus der App nicht im Einsatzplan'); }
   ok('Zusage der Vertretung im Einsatzplan sichtbar');
-  await klick(s, '#nav a[data-v=objekte]', 'Objekte'); await bild(s, 'b21-objekte');
+  await navKlick(s, 'objekte', 'Objekte'); await bild(s, 'b21-objekte');
   await klick(s, '#abmelden', 'Abmelden'); await s.waitForURL(/anmelden/); ok('Büro abgemeldet');
   await ctx.close();
 }
@@ -423,7 +428,7 @@ async function erweiterung(b) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Erweiterung');
   await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
   // Artikelstamm
-  await klick(s, '#nav a[data-v=abrechnung]', 'Abrechnung'); await klick(s, '[data-reiter=artikel]', 'Reiter Artikel & Leistungen');
+  await navKlick(s, 'abrechnung', 'Abrechnung'); await klick(s, '[data-reiter=artikel]', 'Reiter Artikel & Leistungen');
   await klick(s, '#neuArtikel', '+ Artikel'); await schublade(s, { nummer: 'A-100', bezeichnung: 'Grundreinigung Teppich', beschreibung: 'Sprühextraktion inkl. Fleckentfernung', einheit: 'm²', preis: '3.20' }); await meldungIst(s, /Artikel gespeichert/, 'Artikel angelegt');
   await klick(s, '#neuArtikel', '+ zweiter Artikel'); await schublade(s, { bezeichnung: 'Alt-Artikel', einheit: 'Std.', preis: '30' }); await meldungIst(s, /Artikel gespeichert/, 'zweiter Artikel');
   await s.locator('tr', { hasText: 'Alt-Artikel' }).locator('[data-art]').click(); await schublade(s, { preis: '31.50' }); await meldungIst(s, /Artikel gespeichert/, 'Artikel ändern');
@@ -472,13 +477,13 @@ async function erweiterung(b) {
   await s.fill('[name=bz_ab]', '2027-01-01'); await s.fill('[name=bz_prozent]', '1.4'); await klick(s, '#bzNeu', 'Basiszins eintragen'); await meldungIst(s, /Basiszinssatz eingetragen/, 'Basiszins 2027 eingetragen');
   await klick(s, '[data-bzweg="2027-01-01"]', 'Basiszins entfernen'); if (/01\.01\.2027/.test(await s.textContent('#abBereich'))) throw new Error('Basiszins nicht entfernt'); ok('Basiszins entfernt');
   // Objektakte
-  await klick(s, '#nav a[data-v=objekte]', 'Objekte'); await s.locator('[data-objekt]', { hasText: 'Abnahme-Objekt Kiel' }).click(); await s.waitForURL(/#objekt\//); await ruhig(s);
+  await navKlick(s, 'objekte', 'Objekte'); await s.locator('[data-objekt]', { hasText: 'Abnahme-Objekt Kiel' }).click(); await s.waitForURL(/#objekt\//); await ruhig(s);
   await klick(s, '#akteBearbeiten', 'Objektakte bearbeiten'); await s.selectOption('#schublade [name=objektart]', 'buero'); await s.fill('#schublade [name=zeit_von]', '18:00'); await s.fill('#schublade [name=zeit_bis]', '21:00');
   await schublade(s, { objektnummer: 'O-1001', ap_name: 'Herr Vorort', ap_telefon: '0431 000', schluessel: 'Transponder 12', besonderheiten: 'Serverraum nicht betreten' }); await meldungIst(s, /Objektakte gespeichert/, 'Objektakte gespeichert');
   if (!/Reinigung 18:00–21:00 Uhr/.test(await s.textContent('#inhalt'))) throw new Error('Objektkopf ohne Reinigungszeit'); ok('Objektkopf zeigt Zeiten und Ansprechpartner'); await bild(s, 'b29-objektakte');
   await klick(s, '[data-reiter=rechnungen]', 'Reiter Rechnungen am Objekt'); if (!(await s.locator('#oBereich tr').count())) throw new Error('keine Rechnungen am Objekt'); ok('Rechnungen des Objekts');
   // Planner
-  await klick(s, '#nav a[data-v=planner]', 'Planner öffnen'); await klick(s, '[data-board]', 'Board öffnen'); await s.waitForURL(/#board\//); await klick(s, '#nav a[data-v=planner]', 'zurück zu den Boards');
+  await navKlick(s, 'planner', 'Planner öffnen'); await klick(s, '[data-board]', 'Board öffnen'); await s.waitForURL(/#board\//); await navKlick(s, 'planner', 'zurück zu den Boards');
   await klick(s, '#neuBoard', '+ Board'); await schublade(s, { name: 'Abnahme-Board', beschreibung: 'Test' }); await meldungIst(s, /Gespeichert/, 'Board angelegt'); await s.waitForURL(/#board\/\d+/); await ruhig(s);
   await klick(s, '#bNeu', '+ Aufgabe'); await wahlText(s, '#schublade [name=zustaendig]', 'Anna'); await schublade(s, { titel: 'Streugut bestellen', faellig: plus(3), prioritaet: 'hoch', labels: 'Winter' }); await meldungIst(s, /Gespeichert/, 'Aufgabe an Anna zugewiesen');
   await klick(s, '[data-neuin]', '+ Aufgabe in Spalte'); await schublade(s, { titel: 'Wegwerf-Karte' }); await meldungIst(s, /Gespeichert/, 'zweite Aufgabe');
@@ -493,7 +498,7 @@ async function erweiterung(b) {
   await s.locator('[data-karte]', { hasText: 'Wegwerf' }).click(); await klick(s, '#kErl', 'Karte erledigt'); await s.click('#schublade #abbrechen'); await s.locator('[data-karte]', { hasText: 'Wegwerf' }).click(); await klick(s, '#kBearb', 'bearbeiten'); await klick(s, '#kLoeschen', 'Karte löschen'); await meldungIst(s, /Gelöscht/, 'Karte gelöscht');
   await klick(s, '#bSpalte', '+ Spalte'); await s.locator('[data-spaltebearb]').last().click(); await s.locator('#schublade').waitFor({ state: 'visible' }); await klick(s, '#spLoeschen', 'Spalte löschen');
   await s.locator('[data-spaltebearb]').first().click(); await schublade(s, { name: 'Offen' }); ok('Spalte umbenannt'); await bild(s, 'b30-planner');
-  await klick(s, '#nav a[data-v=planner]', 'Boards'); await klick(s, '#neuBoard', '+ Wegwerf-Board'); await schublade(s, { name: 'Wegwerf-Board' }); await s.waitForURL(/#board\/\d+/); await ruhig(s);
+  await navKlick(s, 'planner', 'Boards'); await klick(s, '#neuBoard', '+ Wegwerf-Board'); await schublade(s, { name: 'Wegwerf-Board' }); await s.waitForURL(/#board\/\d+/); await ruhig(s);
   await klick(s, '#bBearb', 'Board bearbeiten'); await klick(s, '#boardArchiv', 'Board archivieren'); await s.waitForURL(/#planner$/); await ruhig(s);
   if (/Wegwerf-Board/.test(await s.textContent('#inhalt'))) throw new Error('archiviertes Board noch sichtbar'); ok('Board archiviert, Abnahme-Board bleibt');
   // Chat im Büro: Kanal, Nachricht, Aufgabe und Mangel aus der Nachricht, meine Aufgaben
@@ -519,6 +524,77 @@ async function erweiterung(b) {
   await actx.close();
 }
 
+
+// Stufe 29.09.2026: Menü in einer Reihe mit Dropdowns, Bewerbermanagement, Objektauswertung, Controlling-Schnittstellen
+async function stufe3(b) {
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true }); const s = await ctx.newPage(); await beobachten(s, 'Stufe 3');
+  await s.goto(URL0 + '/anmelden'); await s.fill('[name=email]', 'buero@abnahme.test'); await s.fill('[name=passwort]', 'Abnahme-2026!'); await s.click('#los'); await s.waitForURL(URL0 + '/'); await ruhig(s);
+  // Menü: eine Zeile, Dropdowns
+  const mitten = await s.$$eval('#nav > a, #nav > .menue', l => l.map(e => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }));
+  if (Math.max.apply(null, mitten) - Math.min.apply(null, mitten) > 10) throw new Error('Menü läuft über mehrere Zeilen: ' + mitten.map(Math.round).join(',')); ok('Hauptmenü in einer Reihe');
+  if (await s.locator('#nav a[data-v=bewerber]').isVisible()) throw new Error('Dropdown ist ungefragt offen'); ok('Dropdowns zu, bis man sie öffnet');
+  await navKlick(s, 'bewerber', 'Personal ▾ → Bewerber');
+  if (!(await s.locator('#nav .menue.aktiv', { hasText: 'Personal' }).count())) throw new Error('Menügruppe nicht als aktiv markiert'); ok('Menügruppe „Personal" aktiv markiert');
+  // Bewerber
+  await klick(s, '#neuBewerber', '+ Bewerbung erfassen'); await s.selectOption('#schublade [name=beschaeftigungsart]', 'minijob'); await s.selectOption('#schublade [name=quelle]', 'empfehlung'); await s.selectOption('#schublade [name=bewertung]', '4');
+  await schublade(s, { vorname: 'Olena', nachname: 'Abnahme', telefon: '0170 1234', position: 'Reinigungskraft', stunden_wunsch: '10', verfuegbar_ab: plus(7) }); await meldungIst(s, /Gespeichert/, 'Bewerbung erfasst');
+  await s.waitForURL(/#kandidat\/\d+/); await ruhig(s); ok('Bewerberakte geöffnet');
+  await klick(s, '[data-bwstatus="gespraech"]', 'Status Gespräch'); await meldungIst(s, /Status/, 'Status gesetzt');
+  await s.fill('#bwNotiz', 'Pünktlich, freundlich'); await klick(s, '#bwNotizNeu', 'Notiz'); if (!/Pünktlich, freundlich/.test(await s.textContent('#inhalt'))) throw new Error('Notiz fehlt im Verlauf'); ok('Notiz im Verlauf');
+  const lebenslauf = path.join(DATEN, 'lebenslauf.pdf'); fs.writeFileSync(lebenslauf, '%PDF-1.4\n%Lebenslauf\n');
+  await s.setInputFiles('#bwDatei', lebenslauf); await klick(s, '#bwHoch', 'Lebenslauf hochladen'); await meldungIst(s, /Unterlage abgelegt/, 'Unterlage abgelegt');
+  await s.setInputFiles('#bwDatei', lebenslauf); await klick(s, '#bwHoch', 'zweite Unterlage'); await meldungIst(s, /Unterlage abgelegt/, 'zweite Unterlage'); await s.locator('[data-bwdokweg]').last().click(); await ruhig(s); await meldungIst(s, /Entfernt/, 'Unterlage entfernt');
+  await klick(s, '#bwBearbeiten', 'Bewerbung bearbeiten'); await schublade(s, { sprachen: 'Deutsch, Ukrainisch' }); await meldungIst(s, /Gespeichert/, 'Bewerbung gespeichert');
+  await klick(s, '#bwEinstellen', 'Einstellen'); await schublade(s, {}); await meldungIst(s, /Eingestellt/, 'eingestellt → Personalakte'); await s.waitForURL(/#person\/\d+/); await ruhig(s);
+  if (!/Olena Abnahme/.test(await s.textContent('#titel')) || !(await s.locator('[data-reiter=dokumente]', { hasText: '(1)' }).count())) throw new Error('Personalakte ohne Name oder Unterlage'); ok('Personalakte mit Bewerbungsunterlage');
+  // zweite Bewerbung: Absage, Löschfrist, Board
+  await navKlick(s, 'bewerber', 'Bewerber'); await klick(s, '#neuBewerber', '+ zweite Bewerbung'); await schublade(s, { nachname: 'Absage-Test' }); await s.waitForURL(/#kandidat\/\d+/); await ruhig(s); const bid2 = s.url().split('/').pop();
+  await klick(s, '[data-bwstatus="absage"]', 'Absage'); await meldungIst(s, /Status/, 'Absage mit Grund'); if (!/Löschung ab/.test(await s.textContent('#inhalt'))) throw new Error('Löschfrist fehlt'); ok('Löschfrist nach Absage angezeigt');
+  let d = datenbank(); d.prepare('UPDATE bewerber SET loeschen_ab = ? WHERE id = ?').run(plus(-1), Number(bid2)); d.close();
+  await navKlick(s, 'bewerber', 'Bewerber'); await klick(s, '[data-reiter=fristen]', 'Reiter Löschfristen'); await klick(s, '[data-bwloeschen]', 'löschfällige Bewerbung löschen'); await meldungIst(s, /Gelöscht/, 'nach Frist gelöscht');
+  await klick(s, '#neuBewerber', '+ dritte Bewerbung'); await schublade(s, { nachname: 'Board-Test' }); await s.waitForURL(/#kandidat\/\d+/); await navKlick(s, 'bewerber', 'Bewerber'); await klick(s, '[data-reiter=board]', 'Bewerber-Board');
+  await s.locator('[data-bw]', { hasText: 'Board-Test' }).dragTo(s.locator('[data-bwspalte="kontakt"]')); await meldungIst(s, /Status geändert/, 'Karte auf „Kontakt" gezogen');
+  if (!(await s.locator('[data-bwspalte="kontakt"] [data-bw]', { hasText: 'Board-Test' }).count())) throw new Error('Karte nicht in „Kontakt"'); ok('Board zeigt neuen Status'); await bild(s, 'b31-bewerber');
+  await s.locator('[data-bw]', { hasText: 'Board-Test' }).click(); await s.waitForURL(/#kandidat\//); await ruhig(s); await klick(s, '[data-bwstatus="absage"]', 'Absage'); await meldungIst(s, /Status/, 'Absage'); await klick(s, '#bwLoeschen', 'Bewerbung sofort löschen'); await meldungIst(s, /Gelöscht/, 'Bewerbung gelöscht'); await s.waitForURL(/#bewerber$/);
+  await klick(s, '[data-reiter=liste]', 'Bewerberliste'); await klick(s, '[data-reiter=quellen]', 'Quellen');
+  // Objektauswertung
+  await navKlick(s, 'objektauswertung', 'Objekte ▾ → Objektauswertung'); await s.locator('#oaErgebnis table').waitFor();
+  await s.selectOption('#oaArt', 'jahr'); await ruhig(s); await klick(s, '#oaLaden', 'Jahr anzeigen'); if (!/Abnahme-Objekt Kiel/.test(await s.textContent('#oaErgebnis'))) throw new Error('Objekt fehlt in der Auswertung'); ok('Objekt in der Jahresauswertung');
+  await s.locator('[data-sort="db"]').click(); await ruhig(s); ok('nach DB sortiert');
+  const [oc] = await Promise.all([s.waitForEvent('download'), s.click('#oaCsv')]); ok('Objektauswertung als CSV: ' + oc.suggestedFilename()); await bild(s, 'b32-objektauswertung');
+  await s.locator('[data-oaobj]', { hasText: 'Abnahme-Objekt Kiel' }).click(); await s.waitForURL(/#objekt\//); await s.locator('[data-reiter="auswertung"].aktiv').waitFor({ timeout: 8000 }); await s.locator('#oBereich table').waitFor(); ok('Objekt öffnet im Reiter Auswertung (12 Monate)');
+  // Controlling
+  await navKlick(s, 'controlling', 'Controlling'); await klick(s, '[data-reiter=einstellungen]', 'Controlling-Einstellungen');
+  await s.fill('[name=datev_berater_nr]', '12345'); await s.fill('[name=datev_mandant_nr]', '678'); await s.fill('[name=sepa_glaeubiger_id]', 'DE98ZZZ09999999999'); await klick(s, '#cSpeichern', 'Einstellungen speichern'); await meldungIst(s, /gespeichert/, 'DATEV- und Bank-Einstellungen');
+  await klick(s, '[data-reiter=datev]', 'Reiter DATEV'); await s.fill('[name=dv_von]', plus(0).slice(0, 4) + '-01-01'); await s.fill('[name=dv_bis]', plus(0).slice(0, 4) + '-12-31');
+  await klick(s, '#dvPruefen', 'Buchungsstapel prüfen'); if (!/Rechnungsbuchungen/.test(await s.textContent('#dvPruef'))) throw new Error('Prüfung ohne Ergebnis'); ok('Buchungsstapel geprüft: ' + (await s.textContent('#dvPruef')).trim());
+  const [dv] = await Promise.all([s.waitForEvent('download'), s.click('#dvLaden')]); const dvp = path.join(DATEN, 'extf.csv'); await dv.saveAs(dvp);
+  if (!/^"EXTF";700;21;"Buchungsstapel"/.test(fs.readFileSync(dvp, 'latin1'))) throw new Error('Buchungsstapel ohne EXTF-Kopf'); ok('DATEV-Buchungsstapel heruntergeladen (EXTF)');
+  await s.fill('[name=lo_monat]', plus(0).slice(0, 7)); await klick(s, '#loPruefen', 'LODAS prüfen');
+  const [lo] = await Promise.all([s.waitForEvent('download'), s.click('#loLaden')]); const lop = path.join(DATEN, 'lodas.txt'); await lo.saveAs(lop); if (!/\[Allgemein\]/.test(fs.readFileSync(lop, 'latin1'))) throw new Error('LODAS-Datei falsch'); ok('LODAS-Datei heruntergeladen');
+  // Kontoauszug: offene Rechnung aus der OP-Liste, Zahlung mit Rechnungsnummer im Verwendungszweck
+  const op = await (await s.request.get(URL0 + '/api/offene-posten')).json(); const p0 = op.posten[0]; if (!p0) throw new Error('keine offene Rechnung für den Kontoauszug');
+  const camt = path.join(DATEN, 'auszug.xml'); fs.writeFileSync(camt, '<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"><BkToCstmrStmt><Stmt><Ntry><Amt Ccy="EUR">100.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>' + plus(0) + '</Dt></BookgDt><AcctSvcrRef>ABN-1</AcctSvcrRef><NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Testkunde Abnahme GmbH</Nm></Dbtr></RltdPties><RmtInf><Ustrd>Teilzahlung ' + p0.nummer + '</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry></Stmt></BkToCstmrStmt></Document>');
+  await klick(s, '[data-reiter=bank]', 'Reiter Kontoauszug'); await s.setInputFiles('#camtDatei', camt); await klick(s, '#camtLesen', 'Kontoauszug einlesen'); await meldungIst(s, /1 Kontobewegungen gelesen/, 'CAMT gelesen');
+  if (!(await s.locator('[data-camt]:checked').count())) throw new Error('Rechnungsnummer nicht erkannt'); ok('Rechnungsnummer erkannt, Zuordnung vorausgewählt'); await bild(s, 'b33-kontoauszug');
+  await klick(s, '#camtBuchen', 'Zahlung buchen'); await meldungIst(s, /1 Zahlungen gebucht/, 'Zahlung aus dem Kontoauszug gebucht');
+  if (!/schon eingelesen/.test(await s.textContent('#camtErgebnis'))) throw new Error('doppelter Import nicht gesperrt'); ok('gleiche Kontobewegung nicht doppelt buchbar');
+  // Debitoren & Mandat, SEPA-Lastschrift
+  await klick(s, '[data-reiter=debitoren]', 'Reiter Debitoren & Mandate'); await s.locator('tr', { hasText: 'Testkunde Abnahme' }).locator('[data-deb]').click();
+  await s.selectOption('#schublade [name=lastschrift]', 'B2B'); await schublade(s, { debitor_konto: '10100', sepa_iban: 'DE02 1203 0000 0000 2020 51', mandat_datum: '2026-09-01' }); await meldungIst(s, /Gespeichert/, 'Mandat hinterlegt');
+  await klick(s, '[data-reiter=lastschrift]', 'Reiter Lastschrift'); await s.locator('[data-ls]').first().waitFor(); ok('offene Rechnungen mit Mandat');
+  const [ls] = await Promise.all([s.waitForEvent('download'), s.click('#lsErzeugen')]); const lsp = path.join(DATEN, 'pain008.xml'); await ls.saveAs(lsp);
+  if (!/pain\.008\.001\.08/.test(fs.readFileSync(lsp, 'utf8')) || !/<SeqTp>FRST<\/SeqTp>/.test(fs.readFileSync(lsp, 'utf8'))) throw new Error('Lastschriftdatei falsch'); ok('SEPA-Lastschrift pain.008 mit Erst-Lastschrift');
+  await klick(s, '[data-reiter=ueberblick]', 'Controlling-Überblick'); await bild(s, 'b34-controlling');
+  // Handy: Menü hinter ☰, Gruppen klappen auf
+  await s.setViewportSize({ width: 390, height: 844 }); await ruhig(s);
+  if (await s.locator('#nav').isVisible()) throw new Error('Menü am Handy nicht eingeklappt');
+  const breit = await s.evaluate(() => Math.max(document.querySelector('.leiste .innen').scrollWidth, document.querySelector('.kopf .innen').scrollWidth) - window.innerWidth);
+  if (breit > 1) throw new Error('Kopf am Handy ' + breit + ' px breiter als der Bildschirm'); ok('Handy: Kopf passt in die Breite'); await klick(s, '#navKnopf', 'Handy: Menü öffnen');
+  await navKlick(s, 'kunden', 'Handy: Kunden & Finanzen → Kunden'); if (await s.locator('#nav').isVisible()) throw new Error('Menü schließt nach der Wahl nicht'); ok('Handy: Menü schließt nach der Wahl'); await bild(s, 'b35-menue-handy');
+  await ctx.close();
+}
+
 (async function () {
   const mitWebkit = process.argv.includes('--webkit');
   // Attrappe der Adresssuche (Nominatim-Schnittstelle), damit die Abnahme ohne Internet und ohne fremden Dienst läuft
@@ -531,7 +607,7 @@ async function erweiterung(b) {
   try {
     b = await chromium.launch();
     if (process.env.NUR_APP) { await app(b, true); throw new Error('NUR_APP fertig'); }
-    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b); await erweiterung(b);
+    const oid = await buero1(b); await app(b, true); await kunde(b, oid); await buero2(b); await abrechnen(b); await erweiterung(b); await stufe3(b);
     await b.close(); b = null;
     if (mitWebkit) {
       const w = await webkit.launch(); const ctx = await w.newContext({ viewport: { width: 390, height: 844 } }); const s = await ctx.newPage(); await beobachten(s, 'WebKit');

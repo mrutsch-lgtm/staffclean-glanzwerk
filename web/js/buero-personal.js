@@ -19,7 +19,8 @@
 
   // ---------------------------------------------------------------- Personalliste
   let reiterP = 'liste', filterP = { status: 'aktiv', suche: '' };
-  A.mitarbeiter = async function mitarbeiter() {
+  A.mitarbeiter = async function mitarbeiter(arg) {
+    if (arg && ['liste', 'fristen', 'auswertung', 'urlaub'].indexOf(arg) >= 0) reiterP = arg;
     G.kopf('Personal', 'Das <span class="akzent">Team</span>', 'Personalakten mit allen Angaben für Lohnbüro, Sozialversicherung und Aufenthaltsrecht, Dokumente, Urlaub und Krankheit, Fristen und die Monatsauswertung. Ausgeschiedene werden gesperrt, nicht gelöscht.',
       '<button class="knopf gold" id="neuMa">+ Mitarbeiter</button><a class="knopf hell" href="/api/personal/fragebogen" target="_blank">Personalfragebogen (leer)</a><a class="knopf hell" href="/api/personal/stammdaten.csv">Stammdaten fürs Lohnbüro</a>');
     inhalt.innerHTML = G.reiter([['liste', 'Personal'], ['fristen', 'Fristen & Lücken'], ['auswertung', 'Monatsauswertung'], ['urlaub', 'Urlaubskonten']], reiterP, function (r) { reiterP = r; laden(); }) + '<div id="pBereich"></div>';

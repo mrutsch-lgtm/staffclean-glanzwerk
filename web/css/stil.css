@@ -321,3 +321,37 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
 .eingang .fuss a { color: #7ff0c6; font-weight: 700; }
 @keyframes glanzAtmen { 0%, 100% { opacity: .75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
 @media (prefers-reduced-motion: reduce) { .eingang .buehne::before { animation: none; } }
+
+/* ---------- Hauptmenü in einer Reihe mit Dropdowns (öffnet bei Maus, Klick oder Antippen; schließt beim Verlassen) */
+.kopf .innen { flex-wrap: nowrap; }
+.nav { flex-wrap: nowrap; align-items: center; }
+.nav a, .nav .menue > button { white-space: nowrap; }
+.nav .menue { position: relative; }
+.nav .menue > button { color: #e6f2ec; font: inherit; font-weight: 700; font-size: .82rem; letter-spacing: .06em; text-transform: uppercase; padding: .55rem .8rem; border-radius: 10px; background: none; border: 0; cursor: pointer; position: relative; }
+.nav .menue > button::after { content: '▾'; margin-left: .35rem; font-size: .7rem; opacity: .7; }
+.nav .menue:hover > button, .nav .menue:focus-within > button { background: rgba(255,255,255,.07); }
+.nav .menue.aktiv > button { color: var(--gruen-400); }
+.nav .menue.aktiv > button::before { content: ''; position: absolute; left: 30%; right: 30%; bottom: .25rem; height: 2px; background: var(--gruen-400); border-radius: 2px; }
+.nav .unter { display: none; position: absolute; top: 100%; left: 0; min-width: 240px; padding: .4rem; margin-top: .2rem; background: var(--gruen-900); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; box-shadow: var(--schatten-hoch); z-index: 30; }
+.nav .unter::before { content: ''; position: absolute; left: 0; right: 0; top: -.5rem; height: .5rem; }
+.nav .menue:hover .unter, .nav .menue:focus-within .unter { display: grid; }
+.nav .unter a { text-transform: none; letter-spacing: 0; font-size: .9rem; font-weight: 600; padding: .55rem .75rem; }
+.nav .unter a.aktiv::after { display: none; }
+.nav .unter a.aktiv { background: rgba(52, 211, 153, .12); }
+.nav-knopf { display: none; margin-left: auto; background: none; border: 1px solid rgba(255,255,255,.2); color: #fff; border-radius: 10px; font-size: 1.3rem; padding: .25rem .7rem; cursor: pointer; }
+@media (max-width: 1180px) { .nav .menue > button { font-size: .74rem; letter-spacing: .03em; padding: .5rem .55rem; } .kopf .innen { gap: 1rem; } }
+@media (max-width: 900px) {
+  .kopf .innen { flex-wrap: wrap; }
+  .nav-knopf { display: block; }
+  .nav { display: none; order: 3; width: 100%; flex-direction: column; align-items: stretch; overflow: visible; padding-bottom: .6rem; }
+  .nav.offen { display: flex; }
+  .nav .menue > button { width: 100%; text-align: left; }
+  .nav .unter { position: static; box-shadow: none; margin: 0 0 .3rem .8rem; min-width: 0; }
+}
+
+/* Handy: obere Leiste darf nie breiter als der Bildschirm sein */
+@media (max-width: 600px) {
+  .leiste .innen { flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
+  .leiste .pille:first-child { display: none; }
+  html, body { overflow-x: hidden; }
+}

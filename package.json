@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test --test-concurrency=1 test/turnus.test.js test/lv-import.test.js test/kalkulation.test.js test/steuer.test.js test/api.test.js test/netzbetrieb.test.js test/erweiterung.test.js",
+    "test": "node --test --test-concurrency=1 test/turnus.test.js test/lv-import.test.js test/kalkulation.test.js test/steuer.test.js test/api.test.js test/netzbetrieb.test.js test/erweiterung.test.js test/controlling.test.js",
     "abnahme": "node test/knopf-inventur.js && node test/abnahme-browser.js --webkit",
     "pruefen-erechnung": "node werkzeuge/pruefen-erechnung.js"
   },

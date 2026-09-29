@@ -39,6 +39,11 @@ const db = DB.oeffnen();
 Z.tabellen(db);
 const KOMM = require('./lib/kommunikation');
 KOMM.tabellen(db);
+const BW = require('./lib/bewerber');
+BW.tabellen(db);
+const AUSW = require('./lib/auswertung');
+const CTRL = require('./lib/controlling');
+CTRL.tabellen(db);
 if (process.env.STAFFCLEAN_DEMO !== '0' && DEMO.anlegen(db)) console.log('Beispieldaten angelegt.');
 
 const heute = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -727,6 +732,86 @@ async function bueroApi(req, res, p, q, ich) {
       if (p === '/api/rechnung/zahlung') return json(res, 200, Object.assign({ ok: true }, AB.zahlungBuchen(db, b)));
       if (p === '/api/rechnung/mahnsperre') { MW.sperre(db, b.id, !!b.an, b.grund); return json(res, 200, { ok: true }); }
     } catch (e) { if (e instanceof Fehler) throw e; throw new Fehler(400, e.message); }
+  }
+  // --- Bewerbermanagement
+  if (p === '/api/bewerber' && req.method === 'GET') {
+    if (q.get('id')) { const x = BW.voll(db, q.get('id')); if (!x) throw new Fehler(404, 'Bewerber nicht gefunden'); return json(res, 200, x); }
+    return json(res, 200, { liste: BW.liste(db), kennzahlen: BW.kennzahlen(db), status: BW.STATUS, quellen: BW.QUELLEN });
+  }
+  if (p === '/api/bewerber/dokument' && req.method === 'GET') {
+    const d = db.prepare('SELECT * FROM bewerber_dokument WHERE id = ?').get(Number(q.get('id'))); if (!d) throw new Fehler(404, 'Dokument nicht gefunden');
+    const datei = path.join(PERSONAL, path.basename(d.datei)); if (!fs.existsSync(datei)) throw new Fehler(404, 'Datei fehlt');
+    res.writeHead(200, { 'Content-Type': d.typ || 'application/octet-stream', 'Content-Disposition': 'inline; filename="' + String(d.titel || 'Bewerbung').replace(/[^A-Za-zÄÖÜäöüß0-9.]+/g, '_') + path.extname(d.datei) + '"', 'Cache-Control': 'no-store' });
+    return fs.createReadStream(datei).pipe(res);
+  }
+  if (p.startsWith('/api/bewerber') && req.method === 'POST') {
+    const b = await leib(req);
+    try {
+      if (p === '/api/bewerber') return json(res, 200, { ok: true, id: BW.speichern(db, b, ich.name) });
+      if (p === '/api/bewerber/status') { BW.statusSetzen(db, b.id, b.status, b.grund, ich.name); return json(res, 200, { ok: true }); }
+      if (p === '/api/bewerber/notiz') { if (!String(b.text || '').trim()) throw new Error('Notiz ist leer'); if (!db.prepare('SELECT 1 FROM bewerber WHERE id = ?').get(Number(b.id))) throw new Error('Bewerber nicht gefunden'); BW.verlauf(db, Number(b.id), ich.name, String(b.text).trim()); return json(res, 200, { ok: true }); }
+      if (p === '/api/bewerber/einstellen') return json(res, 200, { ok: true, mitarbeiter_id: BW.einstellen(db, b.id, b, ich.name, PERSONAL) });
+      if (p === '/api/bewerber/loeschen') {
+        const x = db.prepare('SELECT * FROM bewerber WHERE id = ?').get(Number(b.id)); if (!x) throw new Error('Bewerber nicht gefunden');
+        if (x.status === 'eingestellt') throw new Error('Eingestellte Bewerber leben in der Personalakte weiter — hier nicht löschen.');
+        db.prepare('SELECT datei FROM bewerber_dokument WHERE bewerber_id = ?').all(x.id).forEach(function (d) { try { fs.unlinkSync(path.join(PERSONAL, path.basename(d.datei))); } catch (e) {} });
+        db.prepare('DELETE FROM bewerber WHERE id = ?').run(x.id); return json(res, 200, { ok: true });
+      }
+      if (p === '/api/bewerber/dokument') {
+        if (b.id && b.loeschen) { const d = db.prepare('SELECT * FROM bewerber_dokument WHERE id = ?').get(Number(b.id)); if (d) { db.prepare('DELETE FROM bewerber_dokument WHERE id = ?').run(d.id); try { fs.unlinkSync(path.join(PERSONAL, path.basename(d.datei))); } catch (e) {} } return json(res, 200, { ok: true }); }
+        if (!db.prepare('SELECT 1 FROM bewerber WHERE id = ?').get(Number(b.bewerber_id))) throw new Error('Bewerber nicht gefunden');
+        const m = String(b.datei || '').match(/^data:(application\/pdf|image\/jpeg|image\/png|image\/webp);base64,(.+)$/); if (!m) throw new Error('Bitte PDF, JPG oder PNG hochladen.');
+        const inhalt = Buffer.from(m[2], 'base64'); if (inhalt.length > 10e6) throw new Error('Die Datei ist größer als 10 MB.');
+        const name = 'bw' + Number(b.bewerber_id) + '-' + Date.now() + '-' + require('crypto').randomBytes(4).toString('hex') + { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[m[1]];
+        fs.writeFileSync(path.join(PERSONAL, name), inhalt);
+        return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO bewerber_dokument (bewerber_id, titel, datei, typ) VALUES (?,?,?,?)').run(Number(b.bewerber_id), b.titel || 'Bewerbung', name, m[1]).lastInsertRowid) });
+      }
+    } catch (e) { throw new Fehler(400, e.message); }
+  }
+  // --- Objektauswertung und Controlling
+  if (p === '/api/objektauswertung') { try { return json(res, 200, AUSW.objekte(db, q.get('von'), q.get('bis'))); } catch (e) { throw new Fehler(400, e.message); } }
+  if (p === '/api/objekt/verlauf') { try { return json(res, 200, AUSW.verlauf(db, q.get('id'), Number(q.get('monate')) || 12)); } catch (e) { throw new Fehler(404, e.message); } }
+  if (p === '/api/controlling') {
+    const op = MW.offenePosten(db), e = DB.einstellungen(db);
+    return json(res, 200, { monate: AUSW.monate(db, 12), offen: AB.r2(op.reduce(function (a, x) { return a + x.offen; }, 0)), ueberfaellig: AB.r2(op.filter(function (x) { return x.tageUeberfaellig > 0; }).reduce(function (a, x) { return a + x.offen; }, 0)),
+      konten: CTRL.konten(e), einstellungen: { datev_berater_nr: e.datev_berater_nr, datev_mandant_nr: e.datev_mandant_nr, datev_kontenrahmen: e.datev_kontenrahmen, datev_erloeskonto: e.datev_erloeskonto, datev_erloeskonto_13b: e.datev_erloeskonto_13b, datev_bankkonto: e.datev_bankkonto, datev_wj_beginn: e.datev_wj_beginn, lodas_bs_nr: e.lodas_bs_nr, sepa_glaeubiger_id: e.sepa_glaeubiger_id },
+      kunden: db.prepare('SELECT id, name, kundennummer, debitor_konto, sepa_iban, sepa_bic, mandatsreferenz, mandat_datum, lastschrift FROM kunde ORDER BY name').all() });
+  }
+  if (p === '/api/datev/buchungsstapel') {
+    let d; try { d = CTRL.buchungsstapel(db, q.get('von'), q.get('bis'), { rechnungen: q.get('rechnungen') !== '0', zahlungen: q.get('zahlungen') !== '0' }); } catch (e) { throw new Fehler(400, e.message); }
+    if (q.get('pruefen') === '1') return json(res, 200, { rechnungen: d.rechnungen, zahlungen: d.zahlungen, konten: d.konten, fehlt: d.fehlt });
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=windows-1252', 'Content-Disposition': 'attachment; filename="EXTF_Buchungsstapel_' + q.get('von') + '_' + q.get('bis') + '.csv"', 'Cache-Control': 'no-store' });
+    return res.end(Buffer.from(d.datei, 'latin1'));
+  }
+  if (p === '/api/datev/lodas') {
+    let d; try { d = CTRL.lodas(db, q.get('monat')); } catch (e) { throw new Fehler(400, e.message); }
+    if (q.get('pruefen') === '1') return json(res, 200, { zeilen: d.zeilen, fehlendePersonalnummer: d.fehlendePersonalnummer });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=windows-1252', 'Content-Disposition': 'attachment; filename="LODAS_Bewegungsdaten_' + q.get('monat') + '.txt"', 'Cache-Control': 'no-store' });
+    return res.end(Buffer.from(d.datei, 'latin1'));
+  }
+  if (p === '/api/objektauswertung.csv') {
+    let a; try { a = AUSW.objekte(db, q.get('von'), q.get('bis')); } catch (e) { throw new Fehler(400, e.message); }
+    const z = v => { v = v == null ? '' : String(v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }, k = v => v == null ? '' : String(v).replace('.', ',');
+    const zeilen = ['Objekt;Objektnr.;Kunde;Umsatz netto;Lohnkosten;DB I;DB I %;Soll-Std.;Ist-Std.;Abweichung %;Erlös je Std.;Qualität %;Mängel;Kostenstelle'].concat(a.objekte.map(function (o) { return [o.name, o.objektnummer, o.kunde, k(o.umsatz), k(o.lohnkosten), k(o.db), k(o.dbProzent), k(o.sollStunden), k(o.istStunden), k(o.abweichungProzent), k(o.stundensatz), k(o.qualitaet), o.maengel, CTRL.kostenstelle(o)].map(z).join(';'); }));
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Objektauswertung_' + a.von + '_' + a.bis + '.csv"' }); return res.end('﻿' + zeilen.join('\r\n') + '\r\n');
+  }
+  if (p === '/api/bank/camt' && req.method === 'POST') {
+    const b = await leib(req); const xml = String(b.xml || ''); if (xml.length > 12e6) throw new Fehler(413, 'Datei zu groß');
+    try { return json(res, 200, b.buchen ? Object.assign({ ok: true }, CTRL.camtBuchen(db, xml, b.auswahl)) : { ok: true, umsaetze: CTRL.camtAbgleich(db, xml) }); } catch (e) { throw new Fehler(400, e.message); }
+  }
+  if (p === '/api/lastschrift' && req.method === 'GET') return json(res, 200, CTRL.lastschriftKandidaten(db));
+  if (p === '/api/lastschrift' && req.method === 'POST') {
+    const b = await leib(req); let d; try { d = CTRL.pain008(db, Array.isArray(b.ids) ? b.ids : [], b.datum); } catch (e) { throw new Fehler(400, e.message); }
+    res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="SEPA_Lastschrift_' + b.datum + '.xml"', 'X-Anzahl': String(d.anzahl), 'X-Summe': String(d.summe) }); return res.end(d.xml);
+  }
+  if (p === '/api/zahlweise' && req.method === 'POST') {
+    const b = await leib(req), k = db.prepare('SELECT * FROM kunde WHERE id = ?').get(Number(b.id)); if (!k) throw new Fehler(404, 'Kunde nicht gefunden');
+    const art = ['CORE', 'B2B'].indexOf(b.lastschrift || '') >= 0 ? b.lastschrift : null;
+    const ib = String(b.sepa_iban || '').replace(/\s/g, '').toUpperCase() || null; if (ib) { const f = PERS.iban(ib); if (f) throw new Fehler(400, f); }
+    if (art && (!ib || !String(b.mandatsreferenz || '').trim() || !/^\d{4}-\d{2}-\d{2}$/.test(b.mandat_datum || ''))) throw new Fehler(400, 'Für die Lastschrift braucht es IBAN, Mandatsreferenz und das Datum der Unterschrift.');
+    if (b.debitor_konto && !/^\d{5,9}$/.test(String(b.debitor_konto))) throw new Fehler(400, 'Debitorenkonto: 5 bis 9 Ziffern (z. B. 10001)');
+    db.prepare('UPDATE kunde SET debitor_konto = ?, sepa_iban = ?, sepa_bic = ?, mandatsreferenz = ?, mandat_datum = ?, lastschrift = ? WHERE id = ?').run(b.debitor_konto || null, ib, String(b.sepa_bic || '').trim().toUpperCase() || null, String(b.mandatsreferenz || '').trim() || null, b.mandat_datum || null, art, k.id);
+    return json(res, 200, { ok: true });
   }
   // --- Stammdaten: Kunden, Konten, Tarife, Einstellungen
   if (p === '/api/kunden' && req.method === 'GET') return json(res, 200, db.prepare('SELECT k.*, (SELECT COUNT(*) FROM objekt o WHERE o.kunde_id = k.id) objekte, (SELECT COUNT(*) FROM benutzer b WHERE b.kunde_id = k.id) zugaenge FROM kunde k ORDER BY k.name').all());
