@@ -39,6 +39,7 @@ const db = DB.oeffnen();
 Z.tabellen(db);
 const R = require('./lib/rechte');   // Berechtigungen nach SecPlan-Vorbild (29.09.2026)
 R.tabellen(db);
+Z.einladungSpalten(db);   // Einladung per E-Mail (29.09.2026)
 const KOMM = require('./lib/kommunikation');
 KOMM.tabellen(db);
 const BW = require('./lib/bewerber');
@@ -144,6 +145,15 @@ async function oeffentlich(req, res, p, q) {
     try { id = Z.kontoAnlegen(db, Object.assign({}, b, { rolle: 'buero' })); } catch (e) { throw new Fehler(400, e.message); }
     einrichtungscode = null;
     const s = Z.sitzungAnlegen(db, 'buero', id); return json(res, 200, { ok: true }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
+  }
+  // Einladung einlösen: der Eingeladene legt sein Passwort selbst fest und ist danach angemeldet
+  if (p === '/api/einladung' && req.method === 'GET') { const b = Z.einladungFinden(db, q.get('t')); if (!b) throw new Fehler(404, 'Diese Einladung ist abgelaufen oder schon verwendet. Bitte eine neue anfordern.'); return json(res, 200, { name: b.name, email: b.email }); }
+  if (p === '/api/einladung' && req.method === 'POST') {
+    const b = await leib(req); const schl = 'i|' + adresse(req);
+    if (Z.gebremst(db, schl)) throw new Fehler(429, 'Zu viele Versuche — bitte 15 Minuten warten.');
+    let u; try { u = Z.einladungEinloesen(db, b.t, b.passwort); } catch (e) { Z.fehlversuch(db, schl); throw new Fehler(/Passwort/.test(e.message) ? 400 : 404, e.message); }
+    db.prepare('INSERT INTO anmeldung_log (rolle, wer_id, name) VALUES (?,?,?)').run(u.rolle, u.id, u.name);
+    const s = Z.sitzungAnlegen(db, u.rolle, u.id); return json(res, 200, { ok: true, rolle: u.rolle }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
   }
   if (p === '/api/anmelden' && req.method === 'POST') {
     const b = await leib(req); const email = String(b.email || '').trim().toLowerCase(); const schl = 'k|' + adresse(req) + '|' + email;
@@ -336,9 +346,14 @@ async function kommApi(req, res, p, q, ich) {
 
 // ---------------------------------------------------------------- Büro
 // ---- Berechtigungen (SecPlan-Vorbild, 29.09.2026)
+function einladungAntwort(req, k) {
+  const e = Z.einladungAnlegen(db, k.id);
+  const basis = (HINTER_PROXY ? 'https' : 'http') + '://' + (req.headers.host || '127.0.0.1:' + PORT);
+  return { link: basis + '/einladung?t=' + e.token, bis: e.bis, tage: Z.EINLADUNG_TAGE, name: k.name, email: k.email, anmelden: basis + '/anmelden' };
+}
 function kontenListe() {
   const obj = db.prepare('SELECT benutzer_id, objekt_id FROM objekt_berechtigung').all();
-  return db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, b.berechtigung, b.sonderrechte, b.mitarbeiter_id, m.name mitarbeiter, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id LEFT JOIN mitarbeiter m ON m.id = b.mitarbeiter_id ORDER BY b.rolle, b.name').all()
+  return db.prepare('SELECT b.id, b.name, b.email, b.rolle, b.aktiv, b.berechtigung, b.sonderrechte, b.mitarbeiter_id, b.einladung_bis, m.name mitarbeiter, k.name kunde FROM benutzer b LEFT JOIN kunde k ON k.id = b.kunde_id LEFT JOIN mitarbeiter m ON m.id = b.mitarbeiter_id ORDER BY b.rolle, b.name').all()
     .map(function (k) { return Object.assign(k, { sonderrechte: R.sonderLesen(k.sonderrechte), objekte: obj.filter(function (o) { return o.benutzer_id === k.id; }).map(function (o) { return o.objekt_id; }) }); });
 }
 function objekteSetzen(id, liste) {
@@ -960,11 +975,13 @@ async function bueroApi(req, res, p, q, ich) {
     const b = await leib(req);
     if (b.id && b.sperren != null) { if (Number(b.id) === ich.benutzer.id) throw new Fehler(400, 'Das eigene Konto lässt sich nicht sperren.'); db.prepare('UPDATE benutzer SET aktiv = ? WHERE id = ?').run(b.sperren ? 0 : 1, Number(b.id)); if (b.sperren) db.prepare('DELETE FROM sitzung WHERE benutzer_id = ?').run(Number(b.id)); return json(res, 200, { ok: true }); }
     if (b.id && b.passwort) { if (String(b.passwort).length < 10) throw new Fehler(400, 'Das Passwort braucht mindestens 10 Zeichen'); db.prepare('UPDATE benutzer SET pw = ? WHERE id = ?').run(Z.hash(b.passwort), Number(b.id)); return json(res, 200, { ok: true }); }
+    if (b.id && b.einladen) { const k = db.prepare('SELECT id, name, email FROM benutzer WHERE id = ? AND aktiv = 1').get(Number(b.id)); if (!k) throw new Fehler(404, 'Zugang nicht gefunden.'); return json(res, 200, { ok: true, einladung: einladungAntwort(req, k) }); }
     if (b.id && (b.berechtigung !== undefined || b.sonderrechte !== undefined || b.objekte !== undefined || b.mitarbeiter_id !== undefined)) { berechtigungSpeichern(Number(b.id), b, ich); return json(res, 200, { ok: true }); }
     if (b.rolle === 'buero' && b.berechtigung && !R.ROLLEN[b.berechtigung]) throw new Fehler(400, 'Berechtigung unbekannt');
+    if (b.einladen) b.passwort = Z.zufallsPasswort();   // bis er die Einladung einlöst, kennt niemand ein Passwort
     let neu; try { neu = Z.kontoAnlegen(db, b); } catch (e) { throw new Fehler(400, /UNIQUE/.test(e.message) ? 'Diese E-Mail hat schon einen Zugang.' : e.message); }
     if (b.rolle === 'buero' && Array.isArray(b.objekte)) objekteSetzen(neu, b.objekte);
-    return json(res, 200, { ok: true, id: neu });
+    return json(res, 200, Object.assign({ ok: true, id: neu }, b.einladen ? { einladung: einladungAntwort(req, db.prepare('SELECT id, name, email FROM benutzer WHERE id = ?').get(neu)) } : {}));
   }
   if (p === '/api/tarife' && req.method === 'GET') return json(res, 200, db.prepare('SELECT * FROM tarif ORDER BY lohngruppe, gueltig_ab DESC').all());
   if (p === '/api/tarif' && req.method === 'POST') {
@@ -990,7 +1007,7 @@ function fotoErlaubt(ich, datei) {
   return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id);
 }
 
-const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einrichten': 'einrichten.html', '/drucken/report': 'drucken-report.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
+const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einladung': 'einladung.html', '/einrichten': 'einrichten.html', '/drucken/report': 'drucken-report.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
 
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://x'); const p = u.pathname, q = u.searchParams;

@@ -486,8 +486,8 @@
             const st = sonderText(k);
             return '<tr><td><b>' + esc(k.name) + '</b>' + (k.mitarbeiter ? '<br><span class="leise klein">Mitarbeiterakte: ' + esc(k.mitarbeiter) + '</span>' : '') + '</td><td><span class="marke">' + esc((B.rollen[k.berechtigung] || B.rollen.admin).titel) + '</span></td>' +
               '<td class="klein">' + (st.length ? st.map(esc).join('<br>') : '<span class="leise">–</span>') + '</td><td class="klein">' + (leiter(k.berechtigung) ? (k.objekte.length ? k.objekte.map(function (o) { const x = B.objekte.find(function (y) { return y.id === o; }); return esc(x ? x.name : '#' + o); }).join('<br>') : '<span class="marke orange">keine zugewiesen</span>') : '<span class="leise">alle</span>') + '</td>' +
-              '<td>' + esc(k.email) + '</td><td>' + (k.aktiv ? '<span class="marke">aktiv</span>' : '<span class="marke grau">gesperrt</span>') + '</td>' +
-              '<td style="white-space:nowrap"><button class="knopf zweit klein" data-be="' + k.id + '">bearbeiten</button> <button class="knopf zweit klein" data-pw="' + k.id + '">Passwort</button> <button class="knopf zweit klein" data-sp="' + k.id + '" data-an="' + (k.aktiv ? 1 : 0) + '">' + (k.aktiv ? 'sperren' : 'entsperren') + '</button></td></tr>';
+              '<td>' + esc(k.email) + '</td><td>' + (!k.aktiv ? '<span class="marke grau">gesperrt</span>' : k.einladung_bis && k.einladung_bis > new Date().toISOString() ? '<span class="marke orange">Einladung offen bis ' + datumDe(k.einladung_bis.slice(0, 10)) + '</span>' : '<span class="marke">aktiv</span>') + '</td>' +
+              '<td style="white-space:nowrap"><button class="knopf zweit klein" data-be="' + k.id + '">bearbeiten</button> <button class="knopf zweit klein" data-ei="' + k.id + '">Einladung</button> <button class="knopf zweit klein" data-pw="' + k.id + '">Passwort</button> <button class="knopf zweit klein" data-sp="' + k.id + '" data-an="' + (k.aktiv ? 1 : 0) + '">' + (k.aktiv ? 'sperren' : 'entsperren') + '</button></td></tr>';
           }).join('') + '</tbody></table></div>';
         // Formular für Vergabe und Bearbeitung: Sonderrechte und Objekte folgen der gewählten Rolle
         const formular = function (k) {
@@ -497,24 +497,40 @@
           schublade('<h2>' + (neu ? 'Berechtigung vergeben' : 'Berechtigung: ' + esc(k.name)) + '</h2><div class="formular" style="margin-top:1rem">' +
             auswahl('mitarbeiter_id', 'Mitarbeiter (Personalakte)', [['', '— ohne Mitarbeiterakte —']].concat(B.mitarbeiter.map(function (m) { return [m.id, m.name]; })), k.mitarbeiter_id) +
             auswahl('berechtigung', 'Berechtigung', rollenIds.map(function (r) { return [r, B.rollen[r].titel]; }), k.berechtigung || 'planer') +
-            (neu ? feld('name', 'Name', '') + feld('email', 'E-Mail (Anmeldung)', '', 'email') + feld('passwort', 'Passwort (mind. 10 Zeichen)', '', 'password', ' autocomplete="new-password"') : '') +
+            (neu ? feld('name', 'Name', '') + feld('email', 'E-Mail (Anmeldung)', '', 'email') + '<label class="feld" style="grid-column:1/-1;flex-direction:row;align-items:center;gap:.5rem"><input type="checkbox" name="einladen" checked style="width:auto"> Einladung per E-Mail — er legt sein Passwort über einen Link selbst fest</label>' + '<div id="pwFeld" hidden>' + feld('passwort', 'Passwort (mind. 10 Zeichen)', '', 'password', ' autocomplete="new-password"') + '</div>' : '') +
             '</div><p class="leise klein" id="rollenText"></p><div id="rollenTeil"></div>' + knoepfe(neu ? 'Vergeben' : 'Speichern'), function (w) {
             const rolleFeld = $('[name=berechtigung]', w), maFeld = $('[name=mitarbeiter_id]', w);
             const zeigen = function () { $('#rollenText', w).textContent = B.rollen[rolleFeld.value].text; $('#rollenTeil', w).innerHTML = teil(rolleFeld.value); };
             rolleFeld.onchange = function () { k = Object.assign({}, k, { sonderrechte: {} }); zeigen(); }; zeigen();
+            if (neu) { const ein = $('[name=einladen]', w); ein.onchange = function () { $('#pwFeld', w).hidden = ein.checked; }; }
             if (neu) maFeld.onchange = function () { const m = B.mitarbeiter.find(function (x) { return String(x.id) === maFeld.value; }); if (m && !$('[name=name]', w).value) $('[name=name]', w).value = m.name; };
             $('#speichern', w).onclick = async function () {
               const d = { berechtigung: rolleFeld.value, mitarbeiter_id: maFeld.value ? Number(maFeld.value) : null, sonderrechte: {}, objekte: [] };
               $$('[data-sr]', w).forEach(function (c) { if (c.checked) d.sonderrechte[c.dataset.sr] = true; });
               $$('[data-ob]', w).forEach(function (c) { if (c.checked) d.objekte.push(Number(c.dataset.ob)); });
               try {
-                if (neu) await holen('/api/konto', Object.assign(d, { rolle: 'buero', name: $('[name=name]', w).value, email: $('[name=email]', w).value, passwort: $('[name=passwort]', w).value }));
+                const einladen = neu && $('[name=einladen]', w).checked;
+                let r = null;
+                if (neu) r = await holen('/api/konto', Object.assign(d, { rolle: 'buero', name: $('[name=name]', w).value, email: $('[name=email]', w).value }, einladen ? { einladen: true } : { passwort: $('[name=passwort]', w).value }));
                 else await holen('/api/konto', Object.assign(d, { id: k.id }));
-                schubladeZu(); meldung(neu ? 'Berechtigung vergeben' : 'Gespeichert'); laden();
+                meldung(neu ? 'Berechtigung vergeben' : 'Gespeichert'); laden();
+                if (r && r.einladung) einladungZeigen(r.einladung); else schubladeZu();
               } catch (e) { meldung(e.message); }
             };
           });
         };
+        // Einladung: Link kopieren oder fertige Mail im eigenen Mailprogramm öffnen (Glanzwerk selbst verschickt keine Mails)
+        const einladungZeigen = function (e) {
+          const vorname = String(e.name || '').split(' ')[0];
+          const text = ['Hallo ' + vorname + ',', '', 'du hast jetzt einen Zugang zu Glanzwerk, unserer Software für Planung, Personal und Abrechnung.', '',
+            'Über diesen Link legst du dein Passwort fest (gültig bis ' + datumDe(e.bis.slice(0, 10)) + '):', e.link, '',
+            'Danach meldest du dich immer hier an: ' + e.anmelden, 'Deine Anmeldung ist deine E-Mail-Adresse: ' + e.email, '', 'Sag Bescheid, wenn was unklar ist.', ''].join('\n');
+          schublade('<h2>Einladung für ' + esc(e.name) + '</h2><p class="leise klein">Der Link gilt ' + e.tage + ' Tage und nur einmal. Eine neue Einladung macht die alte ungültig. In der Mail steht kein Passwort.</p><div class="formular" style="grid-template-columns:1fr;margin-top:1rem"><label class="feld">Einladungslink<input id="einLink" readonly value="' + esc(e.link) + '"></label><label class="feld">Mailtext<textarea rows="9" readonly>' + esc(text) + '</textarea></label></div>' +
+            '<div style="display:flex;gap:.6rem;margin-top:1.2rem;flex-wrap:wrap"><a class="knopf" id="einMail" href="mailto:' + encodeURIComponent(e.email) + '?subject=' + encodeURIComponent('Dein Zugang zu Glanzwerk') + '&body=' + encodeURIComponent(text) + '">E-Mail öffnen</a><button class="knopf zweit" id="einKopieren">Link kopieren</button><button class="knopf zweit" id="abbrechen">Schließen</button></div>', function (w) {
+            $('#einKopieren', w).onclick = async function () { try { await navigator.clipboard.writeText(e.link); meldung('Link kopiert'); } catch (x) { $('#einLink', w).select(); meldung('Link markiert — mit Strg+C kopieren'); } };
+          });
+        };
+        $$('[data-ei]').forEach(function (x) { x.onclick = async function () { try { const r = await holen('/api/konto', { id: Number(x.dataset.ei), einladen: true }); laden(); einladungZeigen(r.einladung); } catch (e) { meldung(e.message); } }; });
         $('#neuBuero').onclick = function () { formular({}); };
         $$('[data-be]').forEach(function (x) { x.onclick = function () { formular(l.find(function (k) { return k.id === Number(x.dataset.be); })); }; });
         // Rechte-Übersicht wie „Berechtigungen im Bereich …" in SecPlan: Bereich × Rolle (Grundrechte, ohne Sonderberechtigungen)

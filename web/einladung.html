@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#022c22">
+<title>Glanzwerk · Zugang einrichten</title>
+<link rel="icon" href="/bilder/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/bilder/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/stil.css">
+</head>
+<body class="eingang">
+<div class="buehne">
+  <img class="wortmarke" src="/bilder/glanzwerk-logo-hell.png" alt="Glanzwerk" width="763" height="165">
+  <p class="claim">Planung, Nachweise und Abrechnung für die Gebäudereinigung</p>
+</div>
+<div class="kasten">
+  <h2 id="ueber">Zugang einrichten</h2>
+  <p class="unter" id="unter">Einen Moment …</p>
+  <form id="form" hidden>
+    <label class="feld">E-Mail (deine Anmeldung)<input type="email" name="email" autocomplete="username" readonly></label>
+    <label class="feld">Neues Passwort (mind. 10 Zeichen)<input type="password" name="passwort" autocomplete="new-password" minlength="10" required></label>
+    <label class="feld">Passwort wiederholen<input type="password" name="zwei" autocomplete="new-password" minlength="10" required></label>
+    <div class="fehler" id="fehler"></div>
+    <button class="knopf" type="submit" id="los">Passwort festlegen und anmelden</button>
+  </form>
+</div>
+<p class="fuss">Schon eingerichtet? <a href="/anmelden">Zur Anmeldung</a></p>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const t = new URLSearchParams(location.search).get('t') || '';
+  const f = document.getElementById('form'), fe = document.getElementById('fehler'), unter = document.getElementById('unter');
+  const r = await fetch('/api/einladung?t=' + encodeURIComponent(t));
+  const j = await r.json().catch(function () { return {}; });
+  if (!r.ok) { document.getElementById('ueber').textContent = 'Einladung nicht mehr gültig'; unter.textContent = j.fehler || 'Bitte eine neue Einladung anfordern.'; return; }
+  unter.textContent = 'Hallo ' + j.name + ', leg hier dein Passwort für Glanzwerk fest.';
+  f.email.value = j.email; f.hidden = false; f.passwort.focus();
+  f.onsubmit = async function (ev) {
+    ev.preventDefault(); fe.textContent = '';
+    if (f.passwort.value !== f.zwei.value) { fe.textContent = 'Die beiden Passwörter stimmen nicht überein.'; return; }
+    document.getElementById('los').disabled = true;
+    const a = await fetch('/api/einladung', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: t, passwort: f.passwort.value }) });
+    const b = await a.json().catch(function () { return {}; });
+    document.getElementById('los').disabled = false;
+    if (!a.ok) { fe.textContent = b.fehler || 'Das hat nicht geklappt.'; return; }
+    location.href = b.rolle === 'kunde' ? '/kunde' : '/';
+  };
+})();
+</script>
+</body>
+</html>

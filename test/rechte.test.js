@@ -108,3 +108,27 @@ test('Aussperren verhindert: eigene Admin-Berechtigung und letzter Admin bleiben
   const martinKonto = b.konten.find(k => k.id === planerId);
   assert.strictEqual(martinKonto.mitarbeiter, 'Martin Korf');
 });
+
+test('Einladung per E-Mail: Link statt Passwort, einmal gültig, neue Einladung macht alte ungültig', async function () {
+  const r = await rufen('admin', '/api/konto', { rolle: 'buero', berechtigung: 'bereichsadmin', name: 'Martin Korf', email: 'martin.korf@example.org', einladen: true, mitarbeiter_id: martin });
+  assert.strictEqual(r.status, 200);
+  const e = r.j.einladung; assert.ok(e && /\/einladung\?t=[A-Za-z0-9_-]{20,}$/.test(e.link) && e.tage === 7);
+  const t = new URL(e.link).searchParams.get('t');
+  assert.strictEqual((await rufen('neu', '/api/anmelden', { email: 'martin.korf@example.org', passwort: 'irgendwas-langes-99' })).status, 401, 'ohne eingelöste Einladung kein Passwort bekannt');
+  assert.strictEqual((await rufen('neu', '/api/einladung?t=falsch-falsch-falsch-falsch')).status, 404);
+  assert.strictEqual((await rufen('neu', '/api/einladung?t=' + t)).j.email, 'martin.korf@example.org');
+  // neue Einladung → alte ungültig
+  const zweite = (await rufen('admin', '/api/konto', { id: r.j.id, einladen: true })).j.einladung;
+  const t2 = new URL(zweite.link).searchParams.get('t');
+  assert.strictEqual((await rufen('neu', '/api/einladung?t=' + t)).status, 404, 'alte Einladung ist ungültig');
+  assert.strictEqual((await rufen('neu', '/api/einladung', { t: t2, passwort: 'kurz' })).status, 400);
+  assert.strictEqual((await rufen('neu', '/api/einladung', { t: t2, passwort: 'martins-eigenes-passwort-2026' })).status, 200);
+  const ich = (await rufen('neu', '/api/ich')).j;
+  assert.strictEqual(ich.berechtigung, 'bereichsadmin', 'nach dem Einlösen direkt angemeldet');
+  assert.strictEqual((await rufen('neu', '/api/einladung', { t: t2, passwort: 'nochmal-ein-passwort-2026' })).status, 404, 'Link nur einmal');
+  assert.strictEqual((await rufen('m2', '/api/anmelden', { email: 'martin.korf@example.org', passwort: 'martins-eigenes-passwort-2026' })).status, 200);
+  assert.strictEqual((await rufen('neu', '/api/rechnungen')).status, 200, 'Bereichsadmin sieht Abrechnung');
+  assert.strictEqual((await rufen('neu', '/api/berechtigungen')).status, 403, 'aber keine Berechtigungen vergeben');
+  const k = (await rufen('admin', '/api/konten')).j.find(x => x.email === 'martin.korf@example.org');
+  assert.ok(!('einladung_hash' in k) && !k.einladung_bis, 'Einladung erledigt, Hash nie in der Liste');
+});
