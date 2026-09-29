@@ -393,3 +393,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gruen-500);
   .kopfknoepfe .knopf { width: 100%; justify-content: center; text-align: center; padding: .7rem .6rem; font-size: .88rem; white-space: normal; line-height: 1.2; min-height: 48px; }
   .titelband .knopf { flex: none; }
 }
+/* App: Chat-Blase über der festen Leiste „Mangel melden" statt darauf */
+body:has(.app-fuss:not([hidden])) .komm-knopf { bottom: 6.2rem; }
+body:has(.app-fuss:not([hidden])) .komm-panel { bottom: 10.4rem; height: calc(100vh - 12rem); }

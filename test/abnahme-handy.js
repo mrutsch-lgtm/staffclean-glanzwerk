@@ -44,7 +44,18 @@ function messen() {
   });
   span.remove();
   alle.filter(function (e) { return e.matches('button, a.knopf, input:not([type=checkbox]):not([type=radio]):not([type=file]), select, textarea, .reiter button, [data-reiter]'); }).forEach(function (e) { const r = e.getBoundingClientRect(); if (r.height < 32) aus.tipp.push(name(e) + ' ' + Math.round(r.height) + ' px hoch'); });
-  ['rand', 'wort', 'tipp', 'schrift'].forEach(function (k) { aus[k] = [...new Set(aus[k])].slice(0, 8); });
+  // Chat-Blase verdeckt einen Knopf / ein Feld, das gerade im Bild ist?
+  aus.verdeckt = [];
+  const blase = document.getElementById('kommKnopf');
+  if (blase && sichtbar(blase)) {
+    const b = blase.getBoundingClientRect();
+    alle.filter(function (e) { return !e.closest('#kommKnopf, #kommPanel') && e.matches('button, a.knopf, input, select, textarea, .app-fuss .knopf'); }).forEach(function (e) {
+      const r = e.getBoundingClientRect(); if (r.bottom < 0 || r.top > window.innerHeight) return;
+      const x = Math.min(r.right, b.right) - Math.max(r.left, b.left), y = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top);
+      if (x > 8 && y > 8 && getComputedStyle(e).position === 'fixed' || (x > 8 && y > 8 && e.closest('.app-fuss'))) aus.verdeckt.push(name(e));
+    });
+  }
+  ['rand', 'wort', 'tipp', 'schrift', 'verdeckt'].forEach(function (k) { aus[k] = [...new Set(aus[k])].slice(0, 8); });
   return aus;
 }
 async function pruefen(p, titel, datei) {
@@ -57,6 +68,7 @@ async function pruefen(p, titel, datei) {
   m.wort.forEach(function (x) { zeilen.push('Wort zerlegt: ' + x); });
   m.tipp.forEach(function (x) { zeilen.push('Tippziel zu klein: ' + x); });
   m.schrift.forEach(function (x) { zeilen.push('Schrift zu klein: ' + x); });
+  m.verdeckt.forEach(function (x) { zeilen.push('Chat-Blase verdeckt: ' + x); });
   console.log((zeilen.length ? '✗ ' : '✓ ') + titel + (zeilen.length ? '\n    ' + zeilen.join('\n    ') : ''));
   zeilen.forEach(function (z) { befunde.push(titel + ': ' + z); });
 }
