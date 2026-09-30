@@ -24,6 +24,7 @@ const BRIEF = require('./lib/pdf/brief');
 const MW = require('./lib/mahnwesen');
 const PERS = require('./lib/personal');
 const OA = require('./lib/objektakte');
+const VERTRIEB = require('./lib/vertrieb');
 
 const PORT = Number(process.env.STAFFCLEAN_PORT || 8790);
 const HOST = process.env.STAFFCLEAN_HOST || '127.0.0.1';
@@ -1029,6 +1030,14 @@ const server = http.createServer(async function (req, res) {
       if (recht.verboten) throw new Fehler(403, recht.verboten);
       if (recht.filter) res.gwFilter = recht.filter;
       return await bueroApi(req, res, p, q, ich);
+    }
+    // Knopf „Vertrieb“ (30.09.2026): nur fürs Büro, öffnet vertrieb.staffclean.de gleich angemeldet
+    if (p === '/vertrieb') {
+      const ich = Z.wer(db, req);
+      if (!ich || ich.rolle !== 'buero') { res.writeHead(302, { Location: '/anmelden' }); return res.end(); }
+      const ziel = VERTRIEB.adresse(ich.benutzer);
+      if (!ziel) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Die Direktanmeldung in den Vertrieb ist auf diesem Rechner nicht eingerichtet.'); }
+      res.writeHead(302, { Location: ziel, 'Cache-Control': 'no-store' }); return res.end();
     }
     if (p.startsWith('/fotos/')) { const name = path.basename(p); const f = path.join(FOTOS, name); if (fotoErlaubt(Z.wer(db, req), name) && fs.existsSync(f)) { res.writeHead(200, { 'Content-Type': TYPEN[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'private, max-age=3600' }); return fs.createReadStream(f).pipe(res); } res.writeHead(404); return res.end(); }
     if (p === '/js/jsQR.js') { res.writeHead(200, { 'Content-Type': TYPEN['.js'] }); return fs.createReadStream(path.join(__dirname, 'node_modules', 'jsqr', 'dist', 'jsQR.js')).pipe(res); }
