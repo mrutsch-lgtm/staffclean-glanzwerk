@@ -4,6 +4,8 @@ Eigene Software der **StaffClean GmbH** für die Gebäudereinigung — selbst ge
 Konzept und Marktrecherche: `E:\StaffClean-Gehirn\_wissen\konzept_software.md`.
 ⛔ Kein gemeinsamer Code und keine gemeinsame Datenbank mit Staffsec-Systemen.
 
+**Vertrieb (seit 30.09.2026):** Der Menüpunkt „Vertrieb ↗“ (`/vertrieb`, nur Büro) öffnet **https://vertrieb.staffclean.de** gleich angemeldet. Das ist der StaffClean-Vertrieb, eine eigene Instanz des Sales-Hub-Codes mit eigener Datenbank. Geteilt wird kein Code, nur das Format des Anmeldezettels (`lib/vertrieb.js`: 60 s gültig, einmal einlösbar, HMAC-SHA256). Der Schlüssel liegt in `/home/staffsec/sso-schluessel` auf dem Server und wird vom Vertrieb angelegt, Glanzwerk liest ihn nur. Wer im Büro Admin ist, ist auch im Vertrieb Admin, alle anderen sind Vertriebler.
+
 ## Starten
 
 ```
