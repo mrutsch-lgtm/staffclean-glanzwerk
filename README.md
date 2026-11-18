@@ -34,6 +34,20 @@ Daten liegen in `daten\` (SQLite + Fotos, nicht im Git), anderer Ort über `STAF
 - Passwörter und PINs nur als scrypt-Prüfwert; Sitzungs-Cookie HttpOnly/SameSite; 8 Fehlversuche je 15 Minuten.
 - Das erste Büro-Konto lässt sich nur direkt am Rechner anlegen. Läuft nur auf `127.0.0.1`, bis ein Betrieb mit HTTPS eingerichtet ist (`STAFFCLEAN_HTTPS=1` setzt das Secure-Cookie).
 
+## Ausbaustufe 1 (18.11.2026)
+
+| Baustein | Wo | Kurz |
+|---|---|---|
+| Mailversand | `lib/mail.js` | Rechnung, Leistungsnachweis, Prüfbericht per Mail — Entwurf ansehen, erst „Senden" gibt frei, Protokoll, nie zweimal ohne „erneut senden". Passwort nur in `STAFFCLEAN_SMTP_PASS` (GitHub-Secret `STAFFCLEAN_SMTP_PASS`). |
+| Objektportal per QR | `lib/portal.js`, `web/objekt.html` | `/o/<schlüssel>` ohne Anmeldung: Nachweis, Mangel melden (bis 4 Fotos), eigene Meldungen mit Verlauf, LV, Zeiten, Dokumente, Ansprechpartner. Büro schaltet je Objekt ein und wählt die Kacheln; Aushang `/drucken/objekt-qr`. |
+| Tickets | `lib/tickets.js` | Mängel mit Priorität, Bereich, Zuständigem (nur Objektteam), Stand, Verlauf, Entscheidung, Nachkontrolle; App erledigt nur mit Foto. |
+| Leistungsnachweis + Anlagen | `lib/nachweis.js` | Monatsnachweis als PDF; Anlagen je Objekt; „mit Rechnung" hängt beides an jede Rechnungsmail. |
+| Krankmeldung + Push | `lib/krank.js`, `lib/push.js` | „Ich bin krank" in der App → Abwesenheit, bis zu 3 Vertretungen automatisch per Push angefragt, Kanal Objektleitung; Alarm zur Alarmzeit des Objekts einmal an die Objektleitung. |
+| Prüfbericht-Freigabe | `lib/pruefbericht.js` | Kunde sieht Prüfberichte erst nach Freigabe; PDF; Versand per Mail. |
+| Angebot → Objekt | `lib/angebot.js` | Angenommenes Angebot aus dem Vertrieb (signierte Anmeldung wie Knopf „Vertrieb", nur lesend) → Kunde, Objekt, Räume, LV; übernommene Leistungen gesperrt, Änderung nur als Nachtrag. |
+
+Tests: `test/ausbau1.test.js` (Mail und Push im Testbetrieb, nachgebauter Vertrieb mit Signaturprüfung).
+
 ## Fachliches
 
 - **Turnus als Kalenderregel** (`lib/turnus.js`): `5 W`, `3 W` (Mo/Mi/Fr), `2 W` (Di/Fr), `1 W` (Reinigungstag), `2,5 W` (Wechselwoche), `14T`, `1 M`/`2 M`, `1 Q`/`1 H`/`1 J`, Wochentagslisten (`Mo,Do`), `B` = bei Bedarf. Feiertage je Bundesland.

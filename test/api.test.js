@@ -86,6 +86,9 @@ test('Qualitätsprüfung: Stichprobe, Bewertung, Mängel automatisch, Kunde zeic
   const pr = (await rufen('buero', '/api/pruefung?id=' + p.id)).j;
   for (const r of pr.raeume) await rufen('buero', '/api/pruefung/raum', { pruefung_id: p.id, raum_id: r.raum_id, kriterien: r.kriterien.map((k, i) => ({ element: k.element, ok: i !== 0 })) });
   const a = (await rufen('buero', '/api/pruefung/abschliessen', { id: p.id })).j; assert.ok(a.ergebnis > 0 && a.ergebnis < 100 && a.maengel === pr.raeume.length);
+  // Entwurf → Freigabe (18.11.2026): vor der Freigabe sieht der Kunde den Bericht nicht
+  assert.strictEqual((await rufen('kunde', '/api/kunde/abzeichnen', { id: p.id })).status, 404);
+  assert.strictEqual((await rufen('buero', '/api/pruefung/freigeben', { id: p.id })).status, 200);
   assert.strictEqual((await rufen('kunde', '/api/kunde/abzeichnen', { id: p.id })).status, 200);
   assert.ok((await rufen('buero', '/api/pruefung?id=' + p.id)).j.abgezeichnet_von);
 });

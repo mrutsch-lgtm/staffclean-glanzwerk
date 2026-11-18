@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR-Aushang · StaffClean</title>
+<link rel="icon" href="/bilder/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="stylesheet" href="/css/stil.css">
+<style>
+  @page { size: A4; margin: 14mm; } body { background: #fff; }
+  .aushang { max-width: 180mm; margin: 0 auto; text-align: center; padding-top: 8mm; }
+  .aushang img.logo { height: 22mm; width: auto; }
+  .aushang h1 { font-size: 26pt; margin: 10mm 0 3mm; }
+  .aushang .unter { font-size: 14pt; color: #3d4a44; margin: 0 0 8mm; }
+  .aushang img.qr { width: 95mm; height: 95mm; border: 1px solid #d9e2dd; border-radius: 6mm; padding: 4mm; background: #fff; }
+  .aushang ul { list-style: none; padding: 0; margin: 9mm auto 0; display: inline-grid; gap: 3mm; text-align: left; font-size: 13pt; }
+  .aushang li::before { content: '✓  '; color: #10b981; font-weight: 800; }
+  .aushang .fuss { margin-top: 12mm; font-size: 10pt; color: #5b6b63; }
+</style>
+</head>
+<body>
+<div class="aushang">
+  <img class="logo" src="/bilder/logo-dunkel.webp" alt="StaffClean">
+  <h1>Etwas nicht sauber?</h1>
+  <p class="unter" id="name">…</p>
+  <img class="qr" id="qr" alt="QR-Code">
+  <ul id="punkte"></ul>
+  <div class="fuss" id="fuss">Code mit der Handykamera scannen — ohne App, ohne Anmeldung.</div>
+</div>
+<button class="knopf druckknopf" onclick="print()">Drucken</button>
+<script src="/js/ui.js"></script>
+<script>
+(async function () {
+  const { $, esc, holen } = UI;
+  const id = new URLSearchParams(location.search).get('id');
+  try {
+    const [o, p] = await Promise.all([holen('/api/objekt?id=' + encodeURIComponent(id)), holen('/api/objekt/portal?id=' + encodeURIComponent(id))]);
+    if (!p.aktiv) throw new Error('Das Objektportal ist für dieses Objekt ausgeschaltet. Bitte erst unter „Kundenportal & Anlagen" einschalten.');
+    document.title = 'QR-Aushang ' + o.name; $('#name').textContent = o.name + ' · Objektportal';
+    $('#qr').src = '/api/objekt/portal-qr?id=' + encodeURIComponent(id) + '&t=' + Date.now();
+    const T = { melden: 'Mangel melden — mit Foto, direkt an die Objektleitung', nachweis: 'Sehen, was heute erledigt wurde', lv: 'Vereinbarte Leistungen nachlesen', zeiten: 'Unsere Reinigungszeiten', kontakt: 'Ansprechpartner anrufen' };
+    $('#punkte').innerHTML = Object.keys(T).filter(function (k) { return p.kacheln[k]; }).map(function (k) { return '<li>' + esc(T[k]) + '</li>'; }).join('');
+  } catch (e) { document.querySelector('.aushang').innerHTML = '<div class="hinweis">' + esc(e.message) + '</div>'; }
+})();
+</script>
+</body>
+</html>

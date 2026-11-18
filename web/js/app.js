@@ -11,6 +11,14 @@
     ro: { hallo: 'Bună', aufgaben: 'sarcini', erledigt: 'gata', raeume: 'încăperi', mangel: 'Raportează o problemă', wer: 'Cine ești?', pin: 'PIN-ul tău', nichts: 'Azi nu ai sarcini.', fertig: 'Totul gata — mulțumim!', foto: 'Poză', anleitung: 'Cum se face', senden: 'Trimite', was: 'Ce ai observat?', gemeldet: 'Mulțumim, problema a fost raportată.', kommen: 'Sosire', gehen: 'Plecare', da: 'prezent de la', weg: 'plecat la', scannen: 'Scanează codul camerei', schichten: 'Turele mele', bestaetigen: 'Confirmă', bestaetigt: 'confirmat', anfrage: 'Poți înlocui?', ja: 'Da', nein: 'Nu', abmelden: 'Deconectare', frei: 'Azi ești trecut/ă ca absent/ă', standort: 'Se determină locația …', offline: 'Fără rețea — se trimite mai târziu', nachgereicht: 'Trimis', pause: 'Pauză în minute', code: 'Introdu codul', kamera: 'Camera indisponibilă — introdu codul', falsch: 'PIN greșit', vorort: 'Confirmat la fața locului prin cod', lesen: 'Te rog citește și confirmă', gelesen: 'Am citit și am înțeles totul.', erhalten: 'Am primit acestea. Pierderea sau deteriorarea o anunț imediat, în ultima zi de lucru returnez totul.', danke: 'Confirmat — mulțumim!', haken: 'Bifează mai întâi căsuța.' },
     en: { hallo: 'Hello', aufgaben: 'tasks', erledigt: 'done', raeume: 'rooms', mangel: 'Report an issue', wer: 'Who are you?', pin: 'Your PIN', nichts: 'No tasks for you today.', fertig: 'All done — thank you!', foto: 'Photo', anleitung: 'How to', senden: 'Send', was: 'What did you notice?', gemeldet: 'Thanks, the issue has been reported.', kommen: 'Clock in', gehen: 'Clock out', da: 'clocked in since', weg: 'clocked out at', scannen: 'Scan room code', schichten: 'My shifts', bestaetigen: 'Confirm', bestaetigt: 'confirmed', anfrage: 'Can you cover?', ja: 'Yes', nein: 'No', abmelden: 'Log out', frei: 'You are marked as absent today', standort: 'Getting location …', offline: 'Offline — will be sent later', nachgereicht: 'Sent', pause: 'Break in minutes', code: 'Type code', kamera: 'Camera not available — please type the code', falsch: 'Wrong PIN', vorort: 'Confirmed on site by code', lesen: 'Please read and confirm', gelesen: 'I have read and understood everything.', erhalten: 'I have received this. I will report loss or damage immediately and return everything on my last working day.', danke: 'Confirmed — thank you!', haken: 'Please tick the box first.' }
   };
+  // Ausbaustufe 1 (18.11.2026): Krankmeldung, Tickets, Benachrichtigungen
+  const W2 = {
+    de: { krank: 'Ich bin krank', krankUnter: 'Krankmeldung — wir kümmern uns um Ersatz', von: 'von', bis: 'bis', krankHinweis: 'Eine Diagnose brauchen wir nicht. Die Arbeitsunfähigkeitsbescheinigung bitte wie gewohnt einreichen. Gute Besserung!', krankSenden: 'Krankmeldung senden', krankDanke: 'Danke, gute Besserung! Wir haben Ersatz angefragt für:', krankKeine: 'Danke, gute Besserung! In diesem Zeitraum hattest du keine Einsätze.', tickets: 'Meine Tickets', uebernehmen: 'Übernehmen', ticketFoto: 'Erledigt — Foto machen', ticketFertig: 'Danke! Ticket erledigt.', dringend: 'dringend', frist: 'Frist', pushAn: 'Benachrichtigungen einschalten', pushUnter: 'Damit du Vertretungsanfragen und Tickets sofort siehst', pushOk: 'Benachrichtigungen sind an.', pushNein: 'Benachrichtigungen sind im Browser gesperrt — bitte in den Einstellungen des Handys erlauben.' },
+    pl: { krank: 'Jestem chory/a', krankUnter: 'Zgłoszenie choroby — zorganizujemy zastępstwo', von: 'od', bis: 'do', krankHinweis: 'Nie potrzebujemy diagnozy. Zwolnienie lekarskie złóż jak zwykle. Zdrowia!', krankSenden: 'Wyślij zgłoszenie', krankDanke: 'Dziękujemy, zdrowia! Poprosiliśmy o zastępstwo dla:', krankKeine: 'Dziękujemy, zdrowia! W tym czasie nie masz zmian.', tickets: 'Moje zgłoszenia', uebernehmen: 'Przejmuję', ticketFoto: 'Zrobione — zrób zdjęcie', ticketFertig: 'Dziękujemy! Zgłoszenie zamknięte.', dringend: 'pilne', frist: 'termin', pushAn: 'Włącz powiadomienia', pushUnter: 'Aby od razu widzieć prośby o zastępstwo i zgłoszenia', pushOk: 'Powiadomienia są włączone.', pushNein: 'Powiadomienia są zablokowane — zezwól na nie w ustawieniach telefonu.' },
+    ro: { krank: 'Sunt bolnav/ă', krankUnter: 'Anunț de boală — ne ocupăm de înlocuire', von: 'de la', bis: 'până la', krankHinweis: 'Nu avem nevoie de diagnostic. Trimite concediul medical ca de obicei. Însănătoșire grabnică!', krankSenden: 'Trimite anunțul', krankDanke: 'Mulțumim, însănătoșire grabnică! Am cerut înlocuire pentru:', krankKeine: 'Mulțumim, însănătoșire grabnică! Nu ai ture în această perioadă.', tickets: 'Sarcinile mele', uebernehmen: 'Preiau', ticketFoto: 'Gata — fă o poză', ticketFertig: 'Mulțumim! Sarcina este închisă.', dringend: 'urgent', frist: 'termen', pushAn: 'Activează notificările', pushUnter: 'Ca să vezi imediat cererile de înlocuire și sarcinile', pushOk: 'Notificările sunt active.', pushNein: 'Notificările sunt blocate — permite-le în setările telefonului.' },
+    en: { krank: 'I am sick', krankUnter: 'Sick note — we will arrange cover', von: 'from', bis: 'to', krankHinweis: 'We do not need a diagnosis. Please hand in your sick note as usual. Get well soon!', krankSenden: 'Send sick note', krankDanke: 'Thanks, get well soon! We asked for cover for:', krankKeine: 'Thanks, get well soon! You had no shifts in this period.', tickets: 'My tickets', uebernehmen: 'Take it', ticketFoto: 'Done — take a photo', ticketFertig: 'Thanks! Ticket closed.', dringend: 'urgent', frist: 'due', pushAn: 'Turn on notifications', pushUnter: 'So you see cover requests and tickets right away', pushOk: 'Notifications are on.', pushNein: 'Notifications are blocked — please allow them in your phone settings.' }
+  };
+  Object.keys(W2).forEach(function (l) { Object.assign(W[l], W2[l]); });
   let ich = null;
   const t = k => ((ich && W[ich.sprache]) || W.de)[k] || W.de[k];
   const app = $('#app'), titel = $('#apptitel'), zurueck = $('#zurueck');
@@ -75,15 +83,66 @@
       (zuBestaetigen ? '<button class="kachel akzentlinie" id="bestaetigenListe"><span class="symbolkasten" style="margin:0">' + ICON.warnung + '</span><span style="flex:1"><b>' + esc(t('lesen')) + '</b><br><span class="leise klein">' + zuBestaetigen + '</span></span></button>' : '') +
       (plan.abwesend ? '<div class="hinweis">' + esc(t('frei')) + ' (' + esc(plan.abwesend.art) + ')</div>' : '') +
       plan.angebote.map(function (a) { return '<div class="karte akzentlinie"><b>' + esc(t('anfrage')) + '</b><div>' + esc(a.objekt) + ' · ' + esc(UI.tagLang(a.datum)) + '</div><div style="display:flex;gap:.5rem;margin-top:.7rem"><button class="knopf" data-antwort="ja" data-v="' + a.id + '" style="flex:1">' + esc(t('ja')) + '</button><button class="knopf zweit" data-antwort="nein" data-v="' + a.id + '" style="flex:1">' + esc(t('nein')) + '</button></div></div>'; }).join('') +
+      ((plan.tickets || []).length ? '<div class="ueberzeile" style="margin-top:.4rem">' + esc(t('tickets')) + '</div>' + plan.tickets.map(function (x, i) { return '<button class="kachel akzentlinie" data-ticket="' + i + '"><span class="symbolkasten" style="margin:0">' + ICON.warnung + '</span><span style="flex:1"><b>' + esc(x.objekt) + (x.raum ? ' · ' + esc(x.raum) : '') + '</b>' + (x.prioritaet === 'hoch' ? ' <span class="marke rot">' + esc(t('dringend')) + '</span>' : '') + '<br><span class="klein">' + esc(x.text.length > 80 ? x.text.slice(0, 80) + ' …' : x.text) + '</span><br><span class="leise klein">' + esc(t('frist')) + ' ' + esc(UI.datumDe(x.frist)) + '</span></span></button>'; }).join('') : '') +
+      (pushMoeglich() && !plan.push ? '<button class="kachel" id="pushAn"><span class="symbolkasten" style="margin:0">' + ICON.uhr + '</span><span style="flex:1"><b>' + esc(t('pushAn')) + '</b><br><span class="leise klein">' + esc(t('pushUnter')) + '</span></span></button>' : '') +
       (plan.objekte.length ? plan.objekte.map(function (o) { const r = o.soll ? Math.round(o.fertig * 100 / o.soll) : 0; return '<button class="kachel" data-o="' + o.id + '"><span class="rund" style="--p:' + r + '"><span>' + r + '%</span></span><span style="flex:1"><b>' + esc(o.name) + '</b><br><span class="leise klein">' + esc([o.strasse, o.ort].filter(Boolean).join(', ')) + '</span><br><span class="klein">' + o.raeume.length + ' ' + esc(t('raeume')) + ' · ' + o.fertig + '/' + o.soll + '</span>' + (o.zeit ? '<br><span class="marke' + (o.zeit.gehen ? ' grau' : '') + '">' + esc(o.zeit.gehen ? t('weg') + ' ' + o.zeit.gehen.slice(11, 16) : t('da') + ' ' + o.zeit.kommen.slice(11, 16)) + '</span>' : '') + '</span></button>'; }).join('') : '<div class="karte leer">' + esc(t('nichts')) + '</div>') +
+      '<button class="kachel" id="krank"><span class="symbolkasten" style="margin:0">' + ICON.person + '</span><span style="flex:1"><b>' + esc(t('krank')) + '</b><br><span class="leise klein">' + esc(t('krankUnter')) + '</span></span></button>' +
       '<div class="ueberzeile" style="margin-top:.6rem">' + esc(t('schichten')) + '</div>' +
       (schichten.length ? schichten.map(function (s) { return '<div class="karte zeile" style="padding:.8rem 1rem"><div><b>' + esc(UI.tagLang(s.datum)) + '</b> · ' + esc(s.beginn + '–' + s.ende) + '<div class="leise klein">' + esc(s.objekt) + (s.ort ? ' · ' + esc(s.ort) : '') + (s.notiz ? ' · ' + esc(s.notiz) : '') + '</div></div>' + (s.status === 'bestätigt' ? '<span class="marke">✓ ' + esc(t('bestaetigt')) + '</span>' : '<button class="knopf klein" data-bestaetigen="' + s.id + '">' + esc(t('bestaetigen')) + '</button>') + '</div>'; }).join('') : '<div class="leise klein">–</div>') +
       '<button class="knopf zweit" id="abmelden" style="margin-top:.5rem">' + esc(t('abmelden')) + '</button>';
     $$('[data-o]').forEach(function (k) { k.onclick = function () { stapel.push(start); objekt(Number(k.dataset.o)); }; });
+    $$('[data-ticket]').forEach(function (k) { k.onclick = function () { stapel.push(start); ticket(plan.tickets[Number(k.dataset.ticket)]); }; });
+    $('#krank').onclick = function () { stapel.push(start); krank(); };
+    const pa = $('#pushAn'); if (pa) pa.onclick = pushEinschalten;
     $$('[data-antwort]').forEach(function (b) { b.onclick = async function () { try { await holen('/api/app/vertretung', { id: Number(b.dataset.v), antwort: b.dataset.antwort }); start(); } catch (e) { meldung(e.message); } }; });
     $$('[data-bestaetigen]').forEach(function (b) { b.onclick = async function () { try { await holen('/api/app/schicht', { id: Number(b.dataset.bestaetigen) }); meldung('✓'); start(); } catch (e) { meldung(e.message); } }; });
     $('#abmelden').onclick = async function () { try { await holen('/api/abmelden', {}); } catch (e) {} wer(); };
     const bl = $('#bestaetigenListe'); if (bl) bl.onclick = function () { stapel.push(start); bestaetigenListe(offen); };
+  }
+
+  // ------------------------------------------------ Krankmeldung: Zeitraum, keine Diagnose → Glanzwerk fragt Ersatz an
+  function krank() {
+    titelSetzen(t('krank'));
+    app.innerHTML = '<div class="karte"><div class="formular" style="grid-template-columns:1fr 1fr"><label class="feld">' + esc(t('von')) + '<input type="date" id="kVon" value="' + heute() + '" min="' + UI.plusTage(heute(), -1) + '"></label><label class="feld">' + esc(t('bis')) + '<input type="date" id="kBis" value="' + heute() + '" min="' + UI.plusTage(heute(), -1) + '"></label></div>' +
+      '<p class="leise" style="margin-top:.8rem">' + esc(t('krankHinweis')) + '</p><button class="knopf" id="kSenden" style="width:100%;padding:1rem">' + esc(t('krankSenden')) + '</button></div>';
+    $('#kVon').onchange = function () { if ($('#kBis').value < this.value) $('#kBis').value = this.value; };
+    $('#kSenden').onclick = async function () {
+      const b = this; b.disabled = true;
+      try {
+        const r = await holen('/api/app/krank', { von: $('#kVon').value, bis: $('#kBis').value });
+        app.innerHTML = '<div class="karte">' + (r.betroffen.length ? '<b>' + esc(t('krankDanke')) + '</b>' + r.betroffen.map(function (e) { return '<div class="klein" style="margin-top:.4rem">' + esc(UI.tagLang(e.datum)) + ' · ' + esc(e.objekt) + '</div>'; }).join('') : '<b>' + esc(t('krankKeine')) + '</b>') + '</div><button class="knopf" id="kZurueck">OK</button>';
+        $('#kZurueck').onclick = start;
+      } catch (e) { meldung(e.message); b.disabled = false; }
+    };
+  }
+
+  // ------------------------------------------------ Ticket: übernehmen, erledigen nur mit Foto
+  function ticket(x) {
+    titelSetzen(x.objekt, x.raum || x.bereich || '');
+    app.innerHTML = '<div class="karte">' + (x.prioritaet === 'hoch' ? '<span class="marke rot">' + esc(t('dringend')) + '</span> ' : '') + '<span class="leise klein">' + esc(t('frist')) + ' ' + esc(UI.datumDe(x.frist)) + '</span><p style="font-size:1.05rem;margin:.6rem 0 0">' + esc(x.text) + '</p>' +
+      ((x.fotos || []).length ? '<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem">' + x.fotos.map(function (f) { return '<img src="/fotos/' + esc(f) + '" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:10px">'; }).join('') + '</div>' : '') + '</div>' +
+      (x.stand !== 'in_arbeit' ? '<button class="knopf zweit" id="tUeber" style="padding:1rem">' + esc(t('uebernehmen')) + '</button>' : '') +
+      '<button class="knopf" id="tFertig" style="padding:1rem">' + ICON.kamera.replace('<svg', '<svg width="18" height="18"') + ' ' + esc(t('ticketFoto')) + '</button>';
+    const u = $('#tUeber'); if (u) u.onclick = async function () { try { await holen('/api/app/ticket', { id: x.id, stand: 'in_arbeit' }); x.stand = 'in_arbeit'; meldung('✓'); ticket(x); } catch (e) { meldung(e.message); } };
+    $('#tFertig').onclick = function () {
+      const inp = $('#foto'); inp.value = '';
+      inp.onchange = async function () { if (!inp.files[0]) return; try { await holen('/api/app/ticket', { id: x.id, stand: 'erledigt', foto: await verkleinern(inp.files[0]) }); if (navigator.vibrate) navigator.vibrate(30); meldung(t('ticketFertig')); start(); } catch (e) { meldung(e.message); } };
+      inp.click();
+    };
+  }
+
+  // ------------------------------------------------ Benachrichtigungen (Web-Push) — Schlüssel vom Server, Abo an den Server
+  function pushMoeglich() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && Notification.permission !== 'denied'; }
+  async function pushEinschalten() {
+    try {
+      if (await Notification.requestPermission() !== 'granted') { meldung(t('pushNein')); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const k = await holen('/api/app/push-schluessel');
+      const roh = atob(k.schluessel.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - k.schluessel.length % 4) % 4));
+      const schl = new Uint8Array(roh.length); for (let i = 0; i < roh.length; i++) schl[i] = roh.charCodeAt(i);
+      const abo = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: schl });
+      await holen('/api/app/push', { abo: abo.toJSON() }); meldung(t('pushOk')); start();
+    } catch (e) { meldung(e.message || t('pushNein')); }
   }
 
   // ------------------------------------------------ Unterweisungen, Dienstanweisungen und Empfang lesen und bestätigen

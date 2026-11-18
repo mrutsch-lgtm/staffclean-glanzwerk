@@ -96,13 +96,14 @@
   async function objekte() {
     objekteCache = null; const l = await objekteListe();
     const anlegen = !(window.GW_ICH && /^(einsatzleiter|objektleiter)$/.test(window.GW_ICH.berechtigung));   // Objekte legt der Planer an (Server prüft ebenso)
-    kopf('Objekte', 'Alle <span class="akzent">Objekte</span>', 'Jedes Objekt mit Räumen, Leistungsverzeichnis, Kalkulation, QR-Codes und Team.', anlegen ? '<button class="knopf gold" id="neuObjekt">+ Objekt anlegen</button>' + ((window.GW_ICH.bereiche || []).indexOf('stammdaten') >= 0 ? '<a class="knopf hell" href="#import">Aus Excel einlesen</a>' : '') : '');
+    kopf('Objekte', 'Alle <span class="akzent">Objekte</span>', 'Jedes Objekt mit Räumen, Leistungsverzeichnis, Kalkulation, QR-Codes und Team.', anlegen ? '<button class="knopf gold" id="neuObjekt">+ Objekt anlegen</button><button class="knopf hell" id="ausAngebot">Aus angenommenem Angebot</button>' + ((window.GW_ICH.bereiche || []).indexOf('stammdaten') >= 0 ? '<a class="knopf hell" href="#import">Aus Excel einlesen</a>' : '') : '');
     inhalt.innerHTML = l.length ? '<div class="raster k3">' + l.map(function (o) {
       return '<div class="karte klickbar objektkarte" data-objekt="' + o.id + '"><div class="symbolkasten">' + ICON.gebaeude + '</div><h3>' + esc(o.name) + '</h3><div class="leise klein">' + esc([o.kunde, o.strasse, o.ort].filter(Boolean).join(' · ')) + '</div>' +
         '<div style="display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap"><span class="marke">' + o.raeume + ' Räume</span><span class="marke gold">' + o.positionen + ' Leistungen</span>' + (o.monatspreis ? '<span class="marke">' + euro(o.monatspreis) + ' / Monat</span>' : '') + (o.status !== 'aktiv' ? '<span class="marke grau">' + esc(o.status) + '</span>' : '') + '</div></div>';
     }).join('') + '</div>' : '<div class="karte leer">Noch keine Objekte. Lies ein Leistungsverzeichnis ein oder lege ein Objekt an.</div>';
     $$('[data-objekt]').forEach(function (k) { k.onclick = function () { location.hash = '#objekt/' + k.dataset.objekt; }; });
     if ($('#neuObjekt')) $('#neuObjekt').onclick = function () { objektFormular({}); };
+    if ($('#ausAngebot')) $('#ausAngebot').onclick = function () { window.GW_AUSBAU.ausAngebot(function (id) { objekteCache = null; location.hash = '#objekt/' + id; }); };
   }
   async function objektFormular(o) {
     const kunden = await holen('/api/kunden');
@@ -129,10 +130,11 @@
     $('#bearbeiten').onclick = function () { objektFormular(o); };
     $('#ruhen').onclick = async function () { await holen('/api/objekt/status', { id: o.id, status: o.status === 'aktiv' ? 'ruht' : 'aktiv' }); objekteCache = null; meldung('Status geändert'); route(); };
     // Objektkopf wie in der Sicherheitsplanung: oben alles auf einen Blick, darunter die Details in Reitern
-    inhalt.innerHTML = window.GW_OBJEKT.kopf(o, kz) + reiter([['akte', 'Objektakte'], ['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['team', 'Team, Mängel, Prüfungen'], ['standort', 'Standort & QR'], ['auswertung', 'Auswertung'], ['rechnungen', 'Rechnungen (' + kz.rechnungen.length + ')']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
+    inhalt.innerHTML = window.GW_OBJEKT.kopf(o, kz) + reiter([['akte', 'Objektakte'], ['lv', 'Leistungsverzeichnis'], ['woche', 'Woche'], ['kalk', 'Kalkulation & Angebot'], ['team', 'Team, Mängel, Prüfungen'], ['standort', 'Standort & QR'], ['kunde', 'Kundenportal & Anlagen'], ['auswertung', 'Auswertung'], ['rechnungen', 'Rechnungen (' + kz.rechnungen.length + ')']], objektReiter, function (r) { objektReiter = r; zeigen(); }) + '<div id="oBereich"></div>';
     const bereich = $('#oBereich');
     async function zeigen() {
       if (objektReiter === 'akte') return window.GW_OBJEKT.akte(o, kz, bereich);
+      if (objektReiter === 'kunde') return window.GW_AUSBAU.kundenansicht(o, bereich);
       if (objektReiter === 'rechnungen') return window.GW_OBJEKT.rechnungen(o, kz, bereich);
       if (objektReiter === 'auswertung') return window.GW_OBJEKT.auswertung(o, kz, bereich);
       if (objektReiter === 'lv') return lvRaster(o, bereich);
@@ -154,12 +156,14 @@
       o.raeume.map(function (r) {
         return '<tr><th><span class="raumname" data-raum-edit="' + r.id + '" style="cursor:pointer" title="Raum bearbeiten">' + esc(r.name) + '</span><small>' + esc([r.etage, r.belag, r.flaeche_m2 ? String(r.flaeche_m2).replace('.', ',') + ' m²' : '', r.anzahl > 1 ? '× ' + String(r.anzahl).replace('.', ',') : ''].filter(Boolean).join(' · ')) + '</small></th>' + spalten.map(function (t) {
           const p = pos[r.id + '|' + t.id];
-          return '<td><input class="zelle' + (p ? '' : ' zelle-leer') + '" data-raum="' + r.id + '" data-taet="' + t.id + '" value="' + esc(p ? p.turnus : '') + '" placeholder="–" title="' + esc(p ? p.regel : '') + '"></td>';
+          return '<td><input class="zelle' + (p ? '' : ' zelle-leer') + '" data-raum="' + r.id + '" data-taet="' + t.id + '" value="' + esc(p ? p.turnus : '') + '" placeholder="–" title="' + esc(p ? p.regel + (p.quelle === 'angebot' ? ' · aus dem angenommenen Angebot (gesperrt)' : p.quelle === 'nachtrag' ? ' · Nachtrag zum Angebot' : '') : '') + '"' + (p && p.quelle === 'angebot' ? ' style="box-shadow:inset 0 0 0 2px var(--gold, #c9b27c)"' : '') + '></td>';
         }).join('') + '</tr>';
       }).join('') + '</tbody></table></div>' : '<div class="karte leer">Noch keine Räume — erst einen Raum anlegen.</div>');
     $$('.zelle', bereich).forEach(function (z) {
       z.onchange = async function () {
-        try { const r = await holen('/api/position', { raum_id: Number(z.dataset.raum), taetigkeit_id: Number(z.dataset.taet), turnus: z.value });
+        try { const d = { raum_id: Number(z.dataset.raum), taetigkeit_id: Number(z.dataset.taet), turnus: z.value }; let r;
+          try { r = await holen('/api/position', d); }
+          catch (x) { if (!/Angebot/.test(x.message) || !confirm(x.message + '\n\nAls Nachtrag (mit Datum) ändern?')) { z.value = z.defaultValue; throw x; } r = await holen('/api/position', Object.assign(d, { nachtrag: true })); }
           z.classList.toggle('zelle-leer', !z.value.trim()); z.classList.remove('fehler'); z.title = r.regel || ''; meldung(r.entfernt ? 'Leistung entfernt' : 'Turnus: ' + r.regel);
         } catch (e) { z.classList.add('fehler'); meldung(e.message); }
       };
@@ -240,12 +244,15 @@
     const ma = await holen('/api/mitarbeiter');
     bereich.innerHTML = '<div class="raster k2"><div class="karte"><h3>Stammteam</h3><div class="leise klein" style="margin-bottom:.6rem">Diese Kräfte sehen das Objekt in der App auch ohne Schicht. Einzelne Einsätze plant der Dienstplan.</div>' +
       (ma.filter(function (m) { return m.aktiv; }).map(function (m) { const drin = o.mitarbeiter.some(function (x) { return x.id === m.id; }); return '<label style="display:flex;gap:.6rem;align-items:center;padding:.35rem 0"><input type="checkbox" data-ma="' + m.id + '"' + (drin ? ' checked' : '') + '> ' + esc(m.name) + (m.minijob ? ' <span class="marke grau">Minijob</span>' : '') + '</label>'; }).join('') || '<div class="leise">Noch keine Mitarbeiter.</div>') + '</div>' +
-      '<div class="karte"><div class="zeile"><h3>Offene Mängel</h3><button class="knopf zweit klein" id="neuMangel">+ Mangel</button></div>' + (o.maengel.length ? o.maengel.map(function (m) { return '<div class="hinweis" style="margin-top:.5rem">' + esc(m.text) + ' <span class="klein">· ' + esc(datumDe(m.gemeldet_am.slice(0, 10))) + ' · ' + esc(m.quelle) + '</span></div>'; }).join('') : '<span class="marke" style="margin-top:.6rem">Keine offenen Mängel</span>') +
+      '<div class="karte"><div class="zeile"><h3>Offene Mängel & Reklamationen</h3><button class="knopf zweit klein" id="neuMangel">+ Mangel</button></div><div id="oTickets" style="margin-top:.5rem">' + (o.maengel.length ? o.maengel.map(function (m) { return window.GW_AUSBAU.ticketZeile(m, false); }).join('') : '<span class="marke" style="margin-top:.6rem">Keine offenen Mängel</span>') + '</div>' +
       '<div class="zeile" style="margin-top:1.4rem"><h3>Qualitätsprüfungen</h3><button class="knopf zweit klein" id="neuPruefung">Prüfung starten</button></div>' + (o.pruefungen.length ? '<table class="tabelle" style="margin-top:.5rem"><tbody>' + o.pruefungen.map(function (p) { return '<tr><td><a href="#pruefung/' + p.id + '">' + datumDe(p.datum) + '</a></td><td>' + (p.ergebnis != null ? '<b>' + String(p.ergebnis).replace('.', ',') + ' %</b>' : '<span class="marke orange">läuft</span>') + '</td><td class="leise klein">' + esc(p.abgezeichnet_von ? 'abgezeichnet: ' + p.abgezeichnet_von : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="leise klein">Noch keine Prüfung.</div>') + '</div></div>';
     $$('[data-ma]', bereich).forEach(function (c) { c.onchange = async function () { await holen('/api/einsatz', { objekt_id: o.id, mitarbeiter_id: Number(c.dataset.ma), entfernen: !c.checked }); meldung(c.checked ? 'Ins Stammteam aufgenommen' : 'Aus dem Stammteam entfernt'); }; });
     $('#neuPruefung').onclick = async function () { const r = await holen('/api/pruefung', { objekt_id: o.id }); meldung('Stichprobe: ' + r.stichprobe + ' von ' + r.von + ' Räumen'); location.hash = '#pruefung/' + r.id; };
+    window.GW_AUSBAU.ticketsBinden(bereich, function () { route(); });
     $('#neuMangel').onclick = function () {
-      schublade('<h2>Mangel erfassen</h2><div class="formular" style="margin-top:1rem">' + auswahl('raum_id', 'Raum', [['', '— ganzes Objekt —']].concat(o.raeume.map(function (r) { return [r.id, r.name]; })), '') + feld('text', 'Was ist nicht in Ordnung?', '') + feld('frist', 'Frist', plusTage(heute(), 1), 'date') + '</div>' + knoepfe('Erfassen'), function (w) {
+      const team = o.mitarbeiter || [];
+      schublade('<h2>Mangel erfassen</h2><div class="formular" style="margin-top:1rem">' + auswahl('raum_id', 'Raum', [['', '— ganzes Objekt —']].concat(o.raeume.map(function (r) { return [r.id, r.name]; })), '') + feld('text', 'Was ist nicht in Ordnung?', '') + feld('frist', 'Frist', plusTage(heute(), 1), 'date') +
+        auswahl('prioritaet', 'Priorität', [['normal', 'normal'], ['hoch', 'dringend'], ['niedrig', 'kann warten']], 'normal') + auswahl('zuweisen', 'Gleich zuweisen an', [['', '— später —']].concat(team.map(function (m) { return [m.id, m.name]; })), '') + '</div>' + knoepfe('Erfassen'), function (w) {
         $('#speichern', w).onclick = async function () { const d = formDaten(w); d.objekt_id = o.id; try { await holen('/api/mangel', d); schubladeZu(); meldung('Mangel erfasst'); route(); } catch (e) { meldung(e.message); } };
       });
     };
@@ -339,8 +346,9 @@
   async function pruefung(id) {
     const p = await holen('/api/pruefung?id=' + id);
     const fertig = p.ergebnis != null;
-    kopf('Qualitätsprüfung · ' + datumDe(p.datum), esc(p.objekt), 'Stichprobe ' + p.stichprobe + ' Räume · Prüfer ' + esc(p.pruefer || '') + (fertig ? ' · Ergebnis <b>' + String(p.ergebnis).replace('.', ',') + ' %</b>' : ' · je Element „in Ordnung" oder „Mangel" wählen'),
-      '<a class="knopf hell" href="/drucken/pruefung?id=' + p.id + '" target="_blank">Bericht drucken</a>' + (fertig ? '' : '<button class="knopf gold" id="abschliessen">Prüfung abschließen</button>'));
+    kopf('Qualitätsprüfung · ' + datumDe(p.datum), esc(p.objekt), 'Stichprobe ' + p.stichprobe + ' Räume · Prüfer ' + esc(p.pruefer || '') + (fertig ? ' · Ergebnis <b>' + String(p.ergebnis).replace('.', ',') + ' %</b>' : ' · je Element „in Ordnung" oder „Mangel" wählen') +
+      (fertig ? (p.freigegeben_am ? ' · freigegeben von ' + esc(p.freigegeben_von || '') + ' am ' + datumDe(p.freigegeben_am.slice(0, 10)) + (p.versendet_am ? ' · gesendet ' + datumDe(p.versendet_am.slice(0, 10)) : '') : ' · <b>Entwurf — der Kunde sieht den Bericht erst nach der Freigabe</b>') : ''),
+      '<a class="knopf hell" href="/drucken/pruefung?id=' + p.id + '" target="_blank">Bericht drucken</a>' + (fertig ? '<a class="knopf hell" href="/api/pruefung/pdf?id=' + p.id + '" target="_blank">PDF</a>' + (p.freigegeben_am ? '<button class="knopf gold" id="prMail">Per E-Mail senden</button>' : '<button class="knopf gold" id="prFrei">Freigeben</button>') : '<button class="knopf gold" id="abschliessen">Prüfung abschließen</button>'));
     inhalt.innerHTML = p.raeume.map(function (r) {
       return '<div class="karte" style="margin-bottom:1rem"><div class="zeile"><h3>' + esc(r.name) + '</h3>' + (r.fehler ? '<span class="marke rot">' + r.fehler + ' Fehler</span>' : '') + '</div><table class="tabelle" style="margin-top:.5rem"><tbody>' + r.kriterien.map(function (k, i) {
         return '<tr><td>' + esc(k.element) + '</td><td style="width:1%;white-space:nowrap"><div class="bewertung"><button class="ok' + (k.ok === true ? ' an' : '') + '" data-raum="' + r.raum_id + '" data-i="' + i + '" data-w="1"' + (fertig ? ' disabled' : '') + '>in Ordnung</button><button class="nok' + (k.ok === false ? ' an' : '') + '" data-raum="' + r.raum_id + '" data-i="' + i + '" data-w="0"' + (fertig ? ' disabled' : '') + '>Mangel</button></div></td></tr>';
@@ -354,6 +362,8 @@
         const knoepfe = b.parentNode.querySelectorAll('button'); knoepfe[0].classList.toggle('an', k.ok === true); knoepfe[1].classList.toggle('an', k.ok === false);
       };
     });
+    const fr = $('#prFrei'); if (fr) fr.onclick = async function () { if (!confirm('Prüfbericht freigeben? Danach sieht ihn der Kunde im Portal und er lässt sich mailen.')) return; try { await holen('/api/pruefung/freigeben', { id: p.id, objekt_id: p.objekt_id }); meldung('Freigegeben'); pruefung(id); } catch (e) { meldung(e.message); } };
+    const pm = $('#prMail'); if (pm) pm.onclick = function () { window.GW_AUSBAU.mailDialog({ titel: 'Prüfbericht senden', entwurf: '/api/pruefung/mail-entwurf?id=' + p.id, senden: '/api/pruefung/mail', daten: { id: p.id }, nachher: function () { pruefung(id); } }); };
     const a = $('#abschliessen'); if (a) a.onclick = async function () { const bem = prompt('Bemerkung zur Prüfung (optional)') || ''; try { const r = await holen('/api/pruefung/abschliessen', { id: p.id, bemerkung: bem }); meldung('Ergebnis ' + String(r.ergebnis).replace('.', ',') + ' % · ' + r.maengel + ' Mängel angelegt'); pruefung(id); } catch (e) { meldung(e.message); } };
   }
 
@@ -425,11 +435,15 @@
   }
 
   // ================================================================= Mängel
+  let maengelStatus = 'offen';
   async function maengel() {
-    const l = await holen('/api/maengel');
-    kopf('Mängel', 'Offene <span class="akzent">Mängel</span>', 'Von Mitarbeitern, Kunden oder aus Prüfungen gemeldet — jeder Mangel ist eine Aufgabe mit Frist.');
-    inhalt.innerHTML = l.length ? l.map(function (m) { const ueber = m.frist && m.frist < heute(); return '<div class="karte zeile" style="margin-bottom:.7rem"><div><b>' + esc(m.objekt) + (m.raum ? ' · ' + esc(m.raum) : '') + '</b> <span class="marke ' + (m.quelle === 'kunde' ? 'rot' : m.quelle === 'pruefung' ? 'gold' : 'grau') + '">' + esc({ kunde: 'Reklamation', pruefung: 'Prüfung', mitarbeiter: 'Mitarbeiter', buero: 'Büro' }[m.quelle] || m.quelle) + '</span><div>' + esc(m.text) + '</div><div class="leise klein">gemeldet ' + esc(datumDe(m.gemeldet_am.slice(0, 10))) + (m.gemeldet_von ? ' von ' + esc(m.gemeldet_von) : '') + ' · Frist <span' + (ueber ? ' style="color:var(--rot);font-weight:700"' : '') + '>' + esc(datumDe(m.frist)) + '</span>' + (m.foto ? ' · <a href="/fotos/' + esc(m.foto) + '" target="_blank">Foto</a>' : '') + '</div></div><button class="knopf zweit klein" data-erledigt="' + m.id + '">Erledigt</button></div>'; }).join('') : '<div class="karte leer">Keine offenen Mängel.</div>';
-    $$('[data-erledigt]').forEach(function (k) { k.onclick = async function () { await holen('/api/mangel', { id: Number(k.dataset.erledigt), erledigt: true }); meldung('Mangel erledigt'); maengel(); }; });
+    const l = await holen('/api/maengel?status=' + maengelStatus);
+    const neu = l.filter(function (m) { return m.status === 'offen' && m.stand === 'neu'; }).length, ueber = l.filter(function (m) { return m.ueberfaellig; }).length;
+    kopf('Mängel & Reklamationen', (maengelStatus === 'offen' ? 'Offene' : 'Erledigte') + ' <span class="akzent">Tickets</span>', 'Von Mitarbeitern, Kunden, über das Objektportal oder aus Prüfungen gemeldet. Ticket öffnen: zuweisen, Stand setzen, kommentieren, entscheiden.' +
+      (maengelStatus === 'offen' && l.length ? ' <b>' + neu + ' neu, ' + ueber + ' über der Frist.</b>' : ''));
+    inhalt.innerHTML = reiter([['offen', 'Offen'], ['erledigt', 'Erledigt']], maengelStatus, function (r) { maengelStatus = r; maengel(); }) +
+      '<div style="margin-top:.8rem">' + (l.length ? l.map(function (m) { return window.GW_AUSBAU.ticketZeile(m, true); }).join('') : '<div class="karte leer">' + (maengelStatus === 'offen' ? 'Keine offenen Mängel.' : 'Noch nichts erledigt.') + '</div>') + '</div>';
+    window.GW_AUSBAU.ticketsBinden(inhalt, maengel);
   }
 
   // ================================================================= Stammdaten
@@ -472,6 +486,7 @@
         b.innerHTML = '<div class="karte"><div class="formular">' + felder.map(function (f) { return feld(f[0], f[1], e[f[0]]); }).join('') + '</div>' +
           '<div class="formular" style="grid-template-columns:1fr;margin-top:.8rem"><label class="feld">Rechnung: Anschreiben (jede Zeile ein Absatz)<textarea name="rechnung_einleitung" rows="4">' + esc(e.rechnung_einleitung || '') + '</textarea></label><label class="feld">Rechnung: Schlusstext (jede Zeile ein Absatz)<textarea name="rechnung_schluss" rows="4">' + esc(e.rechnung_schluss || '') + '</textarea></label></div><p class="leise klein">Die Lohnart-Nummern sind Platzhalter — bitte mit dem Lohnbüro abstimmen. Ohne eigene Anschrift und Steuernummer (oder USt-IdNr.) lässt Glanzwerk keine Rechnung stellen (§ 14 UStG).</p><button class="knopf" id="eSpeichern">Speichern</button></div>';
         $('#eSpeichern').onclick = async function () { await holen('/api/einstellungen', formDaten(b)); meldung('Einstellungen gespeichert'); };
+        window.GW_AUSBAU.mailEinstellungen(b, e);   // Mailversand: Absender, Server, Stand, Protokoll (18.11.2026)
       } else {
         // Administration → Berechtigungen, wie SecPlan 10.11: Lizenzen je Rolle, Vergabe an Mitarbeiter, Sonderberechtigungen
         const B = await holen('/api/berechtigungen');

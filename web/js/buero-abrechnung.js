@@ -124,7 +124,7 @@
     G.kopf('Rechnung · ' + r.kunde, (r.nummer ? esc(r.nummer) : 'Entwurf') + ' ' + marke(RSTATUS, r.status), esc(r.betreff || r.objekt || 'Sammelrechnung') + ' · ' + zr + (r.datum ? ' · Rechnungsdatum ' + datumDe(r.datum) + ' · fällig ' + datumDe(r.faellig) : '') + (r.bestellnummer ? ' · Bestellnr. ' + esc(r.bestellnummer) : '') + (r.bezahlt_am ? ' · bezahlt am ' + datumDe(r.bezahlt_am) : '') + (r.storno_nummer ? ' · Storno zu ' + esc(r.storno_nummer) : '') + (r.storniert_durch ? ' · storniert durch ' + esc(r.storniert_durch) : '') + (r.mahnsperre ? ' · <b>Mahnsperre</b>' + (r.mahnsperre_grund ? ': ' + esc(r.mahnsperre_grund) : '') : ''),
       (entw ? '<button class="knopf gold" id="reStellen">Rechnung stellen</button><button class="knopf hell" id="reKopf">Kopfdaten & Texte</button>' : '') +
       '<a class="knopf hell" id="rePdf" href="/api/rechnung/pdf?id=' + r.id + '" target="_blank">' + (entw ? 'PDF-Vorschau' : 'PDF (ZUGFeRD)') + '</a>' +
-      (r.nummer ? '<a class="knopf hell" id="rePdfLaden" href="/api/rechnung/pdf?download=1&id=' + r.id + '">PDF herunterladen</a><a class="knopf hell" href="/api/rechnung/xrechnung?id=' + r.id + '">XRechnung</a>' : '') +
+      (r.nummer ? '<button class="knopf gold" id="reMail">Per E-Mail senden</button><a class="knopf hell" id="rePdfLaden" href="/api/rechnung/pdf?download=1&id=' + r.id + '">PDF herunterladen</a><a class="knopf hell" href="/api/rechnung/xrechnung?id=' + r.id + '">XRechnung</a>' : '') +
       (offen ? '<button class="knopf hell" id="reZahlung">Zahlung buchen</button><button class="knopf hell" id="reBezahlt">Voll bezahlt</button><button class="knopf hell" id="reMahnen">Mahnen</button><button class="knopf hell" id="reSperre">' + (r.mahnsperre ? 'Mahnsperre aufheben' : 'Mahnsperre') + '</button>' : '') +
       (r.status === 'bezahlt' ? '<button class="knopf hell" id="reOffen">Wieder offen</button>' : '') +
       (!r.storno_von ? '<button class="knopf hell" id="reKopie">Als Vorlage kopieren</button>' : '') +
@@ -206,6 +206,7 @@
       const g = prompt('Grund für die Mahnsperre (z. B. Kunde prüft, Ratenzahlung vereinbart)'); if (g == null) return;
       await holen('/api/rechnung/mahnsperre', { id: r.id, an: true, grund: g }); meldung('Mahnsperre gesetzt'); neuladen();
     }));
+    knopf('#reMail', function () { window.GW_AUSBAU.mailDialog({ titel: 'Rechnung ' + r.nummer + ' senden', entwurf: '/api/rechnung/mail-entwurf?id=' + r.id, senden: '/api/rechnung/mail', daten: { id: r.id }, nachher: neuladen }); });
     knopf('#reKopie', fehler(async function () { const x = await holen('/api/rechnung/kopieren', { id: r.id }); meldung('Kopie als Entwurf angelegt'); location.hash = '#rechnung/' + x.id; }));
     const aktion = (pfad, frage, text, danach) => fehler(async function () { if (frage && !confirm(frage)) return; const x = await holen(pfad, { id: r.id }); meldung(text(x)); if (danach) danach(x); else neuladen(); });
     knopf('#reStellen', aktion('/api/rechnung/stellen', 'Rechnung jetzt stellen? Danach ist sie nummeriert und nicht mehr änderbar.', function (x) { return 'Gestellt: ' + x.nummer; }));

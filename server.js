@@ -56,6 +56,16 @@ const UW = require('./lib/unterweisung');
 UW.tabellen(db);
 const REGDATEIEN = path.join(DB.ORDNER, 'register');   // Sicherheitsdatenblätter, Verträge, Nachweise — nur Büro
 fs.mkdirSync(REGDATEIEN, { recursive: true });
+// Ausbaustufe 1 aus dem CleaningOS-Abgleich (18.11.2026): Mailversand mit Freigabe, Push an die App, Tickets mit Ablauf,
+// Monats-Leistungsnachweis + Rechnungsanlagen, Objektportal per QR, Selbst-Krankmeldung mit Nachbesetzung, Prüfbericht-Freigabe
+const MAIL = require('./lib/mail'); MAIL.tabellen(db);
+const PUSH = require('./lib/push'); PUSH.tabellen(db);
+const TK = require('./lib/tickets'); TK.tabellen(db);
+const NW = require('./lib/nachweis'); NW.tabellen(db);
+const PORTAL = require('./lib/portal'); PORTAL.tabellen(db);
+const KRANK = require('./lib/krank'); KRANK.tabellen(db);
+const PB = require('./lib/pruefbericht'); PB.tabellen(db);
+const ANG = require('./lib/angebot'); ANG.tabellen(db);
 if (process.env.STAFFCLEAN_DEMO !== '0' && DEMO.anlegen(db)) console.log('Beispieldaten angelegt.');
 
 const heute = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -96,12 +106,12 @@ function objektVoll(id) {
   const o = db.prepare('SELECT o.*, k.name kunde FROM objekt o LEFT JOIN kunde k ON k.id = o.kunde_id WHERE o.id = ?').get(Number(id));
   if (!o) return null;
   o.raeume = db.prepare('SELECT * FROM raum WHERE objekt_id = ? ORDER BY reihenfolge, id').all(o.id);
-  o.positionen = db.prepare('SELECT p.id, p.raum_id, p.taetigkeit_id, p.turnus, p.minuten FROM lv_position p WHERE p.objekt_id = ?').all(o.id)
+  o.positionen = db.prepare('SELECT p.id, p.raum_id, p.taetigkeit_id, p.turnus, p.minuten, p.quelle FROM lv_position p WHERE p.objekt_id = ?').all(o.id)
     .map(function (p) { p.regel = T.lesen(p.turnus, o.reinigungstag).text; return p; });
   const tids = [...new Set(o.positionen.map(function (p) { return p.taetigkeit_id; }))];
   o.taetigkeiten = tids.length ? db.prepare('SELECT * FROM taetigkeit WHERE id IN (' + tids.map(function () { return '?'; }).join(',') + ') ORDER BY id').all(...tids) : [];
   o.mitarbeiter = db.prepare('SELECT m.id, m.name FROM einsatz e JOIN mitarbeiter m ON m.id = e.mitarbeiter_id WHERE e.objekt_id = ?').all(o.id);
-  o.maengel = db.prepare("SELECT * FROM mangel WHERE objekt_id = ? AND status = 'offen' ORDER BY id DESC").all(o.id);
+  o.maengel = TK.liste(db, { status: 'offen', objekt: o.id });
   o.pruefungen = db.prepare('SELECT id, datum, pruefer, ergebnis, stichprobe, geprueft, abgezeichnet_von FROM pruefung WHERE objekt_id = ? ORDER BY datum DESC, id DESC LIMIT 10').all(o.id);
   return o;
 }
@@ -174,8 +184,57 @@ async function oeffentlich(req, res, p, q) {
     const s = Z.sitzungAnlegen(db, 'mitarbeiter', null, m.id); return json(res, 200, { ok: true, name: m.name, sprache: m.sprache }, { 'Set-Cookie': Z.keks(s.token, s.tage, SICHER) });
   }
   if (p === '/api/abmelden' && req.method === 'POST') { const w = Z.wer(db, req); if (w) db.prepare('DELETE FROM sitzung WHERE token = ?').run(w.token); return json(res, 200, { ok: true }, { 'Set-Cookie': Z.keksWeg }); }
+  if (p.startsWith('/api/o/')) { await portalApi(req, res, p, q); return true; }
   return undefined;
 }
+
+// ---------------------------------------------------------------- Objektportal per QR (öffentlich, Schlüssel je Objekt)
+function geraetVon(req) { const m = String(req.headers.cookie || '').match(/(?:^|;\s*)gwp=([A-Za-z0-9_-]{16,40})/); return m ? m[1] : null; }
+async function portalApi(req, res, p, q) {
+  const teile = p.split('/'), o = PORTAL.finden(db, teile[3]), was = teile[4] || '';
+  if (!o) throw new Fehler(404, 'Dieser Zugang ist nicht (mehr) gültig. Bitte den QR-Code im Objekt neu scannen oder uns anrufen.');
+  let geraet = geraetVon(req); const kopf = {};
+  if (!geraet && req.method === 'POST') { geraet = require('crypto').randomBytes(18).toString('base64url'); kopf['Set-Cookie'] = 'gwp=' + geraet + '; Path=/; Max-Age=' + (400 * 86400) + '; HttpOnly; SameSite=Lax' + (SICHER ? '; Secure' : ''); }
+  const nur = k => { if (!PORTAL.darf(o, k)) throw new Fehler(403, 'Dieser Bereich ist für dieses Objekt nicht freigegeben.'); };
+  if (was === '' && req.method === 'GET') return json(res, 200, PORTAL.kopf(db, o, geraet));
+  if (was === 'nachweis') { nur('nachweis'); const m = q.get('monat') || heute().slice(0, 7); if (!/^\d{4}-\d{2}$/.test(m) || m > heute().slice(0, 7)) throw new Fehler(400, 'Monat prüfen'); return json(res, 200, PORTAL.nachweis(db, o, m)); }
+  if (was === 'lv') { nur('lv'); return json(res, 200, PORTAL.lv(db, o)); }
+  if (was === 'zeiten') { nur('zeiten'); return json(res, 200, PORTAL.zeiten(db, o)); }
+  if (was === 'kontakt') { nur('kontakt'); return json(res, 200, PORTAL.kontakt(db, o)); }
+  if (was === 'dokumente') { nur('dokumente'); return json(res, 200, PORTAL.dokumente(db, o)); }
+  if (was === 'dokument') {
+    nur('dokumente'); const a = NW.anlageDatei(db, q.get('id')); if (!a || a.objekt_id !== o.id || !a.im_portal) throw new Fehler(404, 'Dokument nicht gefunden');
+    res.writeHead(200, { 'Content-Type': a.typ || 'application/octet-stream', 'Content-Disposition': 'inline; filename="' + a.dateiname + '"', 'Cache-Control': 'private, no-store' }); return fs.createReadStream(a.pfad).pipe(res);
+  }
+  if (was === 'meldungen') { nur('meldungen'); return json(res, 200, PORTAL.meldungen(db, o, geraet)); }
+  if (was === 'foto') {
+    const name = path.basename(String(q.get('name') || '')); const f = path.join(FOTOS, name);
+    const ok = geraet && /^[mp]\d+-/.test(name) && db.prepare("SELECT 1 FROM mangel WHERE objekt_id = ? AND geraet = ? AND (fotos LIKE ? OR foto = ? OR erledigt_foto = ?)").get(o.id, geraet, '%"' + name + '"%', name, name);
+    if (!ok || !fs.existsSync(f)) throw new Fehler(404, 'Foto nicht gefunden');
+    res.writeHead(200, { 'Content-Type': TYPEN[path.extname(f)] || 'image/jpeg', 'Cache-Control': 'private, max-age=3600' }); return fs.createReadStream(f).pipe(res);
+  }
+  if (was === 'melden' && req.method === 'POST') {
+    nur('melden'); const schl = 'o|' + adresse(req);
+    if (Z.gebremst(db, schl)) throw new Fehler(429, 'Es sind gerade sehr viele Meldungen von diesem Anschluss gekommen. Bitte in 15 Minuten noch einmal oder kurz anrufen.');
+    const b = await leib(req); if (!String(b.text || '').trim()) throw new Fehler(400, 'Bitte kurz beschreiben, was nicht in Ordnung ist.');
+    Z.fehlversuch(db, schl);   // zählt die Meldungen je Anschluss (höchstens 8 in 15 Minuten)
+    const fotos = (Array.isArray(b.fotos) ? b.fotos : []).slice(0, 4).map(function (f) { return fotoSpeichern(f, 'p' + o.id); }).filter(Boolean);
+    let id; try { id = TK.anlegen(db, { objekt_id: o.id, text: b.text, bereich: b.bereich, prioritaet: b.prioritaet, fotos: fotos, quelle: 'portal', gemeldet_von: String(b.name || '').trim().slice(0, 80) || 'Objektportal', geraet: geraet, melder_kontakt: b.kontakt }); } catch (e) { throw new Fehler(400, e.message); }
+    try { KOMM.systemNachricht(db, 'maengel', 'Neue Meldung über das Objektportal · ' + o.name + ': ' + String(b.text).trim().slice(0, 300)); } catch (e) {}
+    if (o.objektleitung_id) PUSH.nebenbei(db, o.objektleitung_id, { titel: 'Neue Meldung ' + o.name, text: String(b.text).trim().slice(0, 160), url: '/app' });
+    return json(res, 200, { ok: true, id: id }, kopf);
+  }
+  if (was === 'nachricht' && req.method === 'POST') {
+    nur('meldungen'); const b = await leib(req); const m = db.prepare('SELECT * FROM mangel WHERE id = ? AND objekt_id = ? AND geraet = ?').get(Number(b.id), o.id, geraet || '');
+    if (!m) throw new Fehler(404, 'Meldung nicht gefunden'); if (!String(b.text || '').trim()) throw new Fehler(400, 'Nachricht ist leer');
+    TK.verlauf(db, m.id, m.gemeldet_von || 'Melder', 'kunde', String(b.text).trim(), true);
+    try { KOMM.systemNachricht(db, 'maengel', 'Nachricht zur Meldung #' + m.id + ' (' + o.name + '): ' + String(b.text).trim().slice(0, 300)); } catch (e) {}
+    return json(res, 200, { ok: true }, kopf);
+  }
+  throw new Fehler(404, 'unbekannter Pfad');
+}
+// Basisadresse für Links nach außen (Portal, QR)
+const basisVon = req => (HINTER_PROXY ? 'https' : 'http') + '://' + (req.headers.host || '127.0.0.1:' + PORT);
 
 // ---------------------------------------------------------------- Mitarbeiter-App
 async function appApi(req, res, p, q, ich) {
@@ -193,6 +252,8 @@ async function appApi(req, res, p, q, ich) {
     plan.objekte.forEach(function (o) { const zb = db.prepare("SELECT id, kommen, gehen FROM zeitbuchung WHERE mitarbeiter_id = ? AND objekt_id = ? AND substr(kommen,1,10) = ? ORDER BY id DESC LIMIT 1").get(mid, o.id, d); o.zeit = zb || null; });
     plan.abwesend = EINS.abwesend(db, mid, d);
     plan.angebote = db.prepare("SELECT v.id, v.datum, o.name objekt FROM vertretung v JOIN objekt o ON o.id = v.objekt_id WHERE v.mitarbeiter_id = ? AND v.status = 'angefragt' AND v.datum >= ?").all(mid, heute());
+    plan.tickets = TK.liste(db, { status: 'offen', zustaendig: mid }).map(function (m) { return { id: m.id, objekt: m.objekt, objekt_id: m.objekt_id, raum: m.raum, bereich: m.bereich, text: m.text, prioritaet: m.prioritaet, stand: m.stand, frist: m.frist, fotos: m.fotos }; });
+    plan.push = PUSH.aktiv(db, mid);
     return json(res, 200, uebersetzen(plan, ich.mitarbeiter.sprache));
   }
   if (p === '/api/app/ich') return json(res, 200, { name: ich.mitarbeiter.name, sprache: ich.mitarbeiter.sprache });
@@ -225,8 +286,29 @@ async function appApi(req, res, p, q, ich) {
   if (p === '/api/app/mangel' && req.method === 'POST') {
     const b = await leib(req); if (!meinObjekt(b.objekt_id)) throw new Fehler(403, 'Nicht dein Objekt.');
     if (!String(b.text || '').trim()) throw new Fehler(400, 'Bitte beschreiben, was dir aufgefallen ist.');
-    const foto = fotoSpeichern(b.foto, 'm' + b.objekt_id);
-    db.prepare('INSERT INTO mangel (objekt_id, raum_id, text, foto, quelle, gemeldet_von, frist) VALUES (?,?,?,?,?,?,?)').run(Number(b.objekt_id), b.raum_id || null, String(b.text).trim(), foto, 'mitarbeiter', ich.mitarbeiter.name, new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+    const foto = fotoSpeichern(b.foto, 'm' + Number(b.objekt_id));
+    TK.anlegen(db, { objekt_id: b.objekt_id, raum_id: b.raum_id, text: b.text, fotos: [foto], quelle: 'mitarbeiter', gemeldet_von: ich.mitarbeiter.name });
+    return json(res, 200, { ok: true });
+  }
+  // Selbst-Krankmeldung → Abwesenheit, Vertretungen werden automatisch angefragt (Push), Objektleitung informiert
+  if (p === '/api/app/krank' && req.method === 'POST') {
+    const b = await leib(req); try { return json(res, 200, Object.assign({ ok: true }, KRANK.melden(db, ich.mitarbeiter, b.von || heute(), b.bis || b.von || heute()))); } catch (e) { throw new Fehler(400, e.message); }
+  }
+  // Benachrichtigungen (Web-Push) ein- und ausschalten
+  if (p === '/api/app/push-schluessel') return json(res, 200, { schluessel: PUSH.schluessel(db).public, aktiv: PUSH.aktiv(db, mid) });
+  if (p === '/api/app/push' && req.method === 'POST') {
+    const b = await leib(req); try { if (b.aus) PUSH.abbestellen(db, mid, b.endpoint); else PUSH.abonnieren(db, mid, b.abo); } catch (e) { throw new Fehler(400, e.message); }
+    return json(res, 200, { ok: true, aktiv: PUSH.aktiv(db, mid) });
+  }
+  // Mir zugewiesene Tickets: übernehmen („in Arbeit") und erledigen — erledigen nur mit Foto
+  if (p === '/api/app/ticket' && req.method === 'POST') {
+    const b = await leib(req); const m = db.prepare("SELECT * FROM mangel WHERE id = ? AND zustaendig_id = ? AND status = 'offen'").get(Number(b.id), mid);
+    if (!m) throw new Fehler(404, 'Dieses Ticket liegt nicht (mehr) bei dir.');
+    try {
+      if (b.stand === 'in_arbeit') TK.standSetzen(db, m.id, 'in_arbeit', ich.mitarbeiter.name);
+      else if (b.stand === 'erledigt') TK.erledigen(db, m.id, { foto: fotoSpeichern(b.foto, 'm' + m.objekt_id), notiz: b.notiz, wer: ich.mitarbeiter.name, pflichtFoto: true });
+      else throw new Error('Unbekannter Schritt');
+    } catch (e) { throw new Fehler(400, e.message); }
     return json(res, 200, { ok: true });
   }
   if (p === '/api/app/raum-code') {
@@ -286,15 +368,39 @@ async function kundeApi(req, res, p, q, ich) {
     const o = meins(q.get('id'));
     const tage = []; for (let i = 0; i < 14; i++) { const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10); const t = PLAN.tag(db, d, { objekt: o.id }); if (t.soll) tage.push({ datum: d, soll: t.soll, fertig: t.fertig, fotos: [].concat(...t.objekte.map(function (x) { return [].concat(...x.raeume.map(function (r) { return r.aufgaben.filter(function (a) { return a.erledigt && a.erledigt.foto; }).map(function (a) { return { raum: r.name, taetigkeit: a.taetigkeit, foto: a.erledigt.foto, zeit: a.erledigt.zeit }; }); })); })), raeume: t.objekte[0] ? t.objekte[0].raeume.map(function (r) { return { name: r.name, soll: r.aufgaben.length, fertig: r.aufgaben.filter(function (a) { return a.erledigt; }).length }; }) : [] }); }
     return json(res, 200, { id: o.id, name: o.name, strasse: o.strasse, ort: o.ort, tage: tage,
-      pruefungen: db.prepare('SELECT id, datum, ergebnis, stichprobe, geprueft, abgezeichnet_von, abgezeichnet_am, bemerkung FROM pruefung WHERE objekt_id = ? AND ergebnis IS NOT NULL ORDER BY datum DESC LIMIT 12').all(o.id),
-      reklamationen: db.prepare("SELECT id, text, gemeldet_am, status, erledigt_am FROM mangel WHERE objekt_id = ? AND quelle = 'kunde' ORDER BY id DESC LIMIT 20").all(o.id) });
+      pruefungen: db.prepare('SELECT id, datum, ergebnis, stichprobe, geprueft, abgezeichnet_von, abgezeichnet_am, bemerkung FROM pruefung WHERE objekt_id = ? AND ' + PB.sqlSichtbar(db) + ' ORDER BY datum DESC LIMIT 12').all(o.id),
+      reklamationen: db.prepare("SELECT id, text, gemeldet_am, status, stand, prioritaet, erledigt_am, geprueft_am FROM mangel WHERE objekt_id = ? AND quelle IN ('kunde','portal') ORDER BY id DESC LIMIT 20").all(o.id)
+        .map(function (m) { m.standText = m.status === 'erledigt' ? (m.geprueft_am ? 'erledigt und geprüft' : 'erledigt') : TK.STAND[m.stand] || 'neu'; return m; }) });
   }
-  if (p === '/api/kunde/pruefung') { const pr = pruefungVoll(q.get('id')); if (!pr || pr.kunde_id !== kid) throw new Fehler(404, 'Prüfbericht nicht gefunden.'); return json(res, 200, pr); }
+  if (p === '/api/kunde/pruefung') { const pr = pruefungVoll(q.get('id')); if (!pr || pr.kunde_id !== kid || !PB.sichtbar(db, pr)) throw new Fehler(404, 'Prüfbericht nicht gefunden.'); return json(res, 200, pr); }
+  if (p === '/api/kunde/pruefung-pdf') {
+    const pr = pruefungVoll(q.get('id')); if (!pr || pr.kunde_id !== kid || !PB.sichtbar(db, pr)) throw new Fehler(404, 'Prüfbericht nicht gefunden.');
+    const d = await PB.pdf(db, pr); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="' + d.name + '"', 'Cache-Control': 'no-store' }); return res.end(d.buf);
+  }
+  // Monats-Leistungsnachweis je Objekt (Übersicht + PDF)
+  if (p === '/api/kunde/nachweis' || p === '/api/kunde/nachweis-pdf') {
+    const o = meins(q.get('objekt')); const m = q.get('monat') || heute().slice(0, 7); if (!/^\d{4}-\d{2}$/.test(m) || m > heute().slice(0, 7)) throw new Fehler(400, 'Monat prüfen');
+    if (p === '/api/kunde/nachweis') return json(res, 200, PORTAL.nachweis(db, o, m));
+    const d = await NW.pdf(db, o.id, m); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="' + d.name + '"', 'Cache-Control': 'no-store' }); return res.end(d.buf);
+  }
+  // Reklamation als Ticket: Verlauf lesen und eine Nachricht dazuschreiben
+  if (p === '/api/kunde/ticket' && req.method === 'GET') {
+    const m = TK.holen(db, q.get('id')); if (!m || !db.prepare('SELECT 1 FROM objekt WHERE id = ? AND kunde_id = ?').get(m.objekt_id, kid) || ['kunde', 'portal'].indexOf(m.quelle) < 0) throw new Fehler(404, 'Meldung nicht gefunden.');
+    return json(res, 200, { id: m.id, objekt: m.objekt, text: m.text, status: m.status, stand: m.status === 'erledigt' ? 'erledigt' : TK.STAND[m.stand] || 'neu', gemeldet_am: m.gemeldet_am, erledigt_am: m.erledigt_am, erledigt_foto: m.erledigt_foto,
+      verlauf: m.verlauf.filter(function (v) { return v.oeffentlich; }).map(function (v) { return { zeit: v.zeit, text: v.text, art: v.art }; }) });
+  }
+  if (p === '/api/kunde/ticket' && req.method === 'POST') {
+    const b = await leib(req); const m = TK.holen(db, b.id); if (!m || !db.prepare('SELECT 1 FROM objekt WHERE id = ? AND kunde_id = ?').get(m.objekt_id, kid)) throw new Fehler(404, 'Meldung nicht gefunden.');
+    if (!String(b.text || '').trim()) throw new Fehler(400, 'Nachricht ist leer'); TK.verlauf(db, m.id, ich.name, 'kunde', String(b.text).trim(), true);
+    try { KOMM.systemNachricht(db, 'maengel', 'Nachricht von ' + ich.name + ' zur Meldung #' + m.id + ' (' + m.objekt + '): ' + String(b.text).trim().slice(0, 300)); } catch (e) {}
+    return json(res, 200, { ok: true });
+  }
   if (p === '/api/kunde/reklamation' && req.method === 'POST') {
     const b = await leib(req); const o = meins(b.objekt_id); if (!String(b.text || '').trim()) throw new Fehler(400, 'Bitte beschreiben Sie kurz, was nicht in Ordnung ist.');
     const foto = fotoSpeichern(b.foto, 'k' + o.id);
-    db.prepare('INSERT INTO mangel (objekt_id, text, foto, quelle, gemeldet_von, frist) VALUES (?,?,?,?,?,?)').run(o.id, String(b.text).trim(), foto, 'kunde', ich.name, new Date(Date.now() + 86400000).toISOString().slice(0, 10));
-    return json(res, 200, { ok: true });
+    const id = TK.anlegen(db, { objekt_id: o.id, text: b.text, bereich: b.bereich, prioritaet: b.prioritaet, fotos: [foto], quelle: 'kunde', gemeldet_von: ich.name });
+    if (o.objektleitung_id) PUSH.nebenbei(db, o.objektleitung_id, { titel: 'Reklamation ' + o.name, text: String(b.text).trim().slice(0, 160), url: '/app' });
+    return json(res, 200, { ok: true, id: id });
   }
   if (p === '/api/kunde/firma') { const e = DB.einstellungen(db); const o = {}; ['firma_name', 'firma_strasse', 'firma_plz', 'firma_ort', 'firma_email', 'firma_telefon', 'steuernummer', 'ust_id', 'bank', 'iban', 'bic', 'handelsregister', 'geschaeftsfuehrung'].forEach(function (k) { o[k] = e[k] || ''; }); return json(res, 200, o); }   // nur, was auf jeder Rechnung steht — keine Kalkulationswerte
   if (p === '/api/kunde/auftraege') return json(res, 200, db.prepare("SELECT a.id, a.text, a.wunschdatum, a.termin, a.status, a.antwort, a.angelegt_am, a.erledigt_am, o.name objekt FROM auftrag a JOIN objekt o ON o.id = a.objekt_id WHERE o.kunde_id = ? ORDER BY a.id DESC LIMIT 50").all(kid));
@@ -312,7 +418,7 @@ async function kundeApi(req, res, p, q, ich) {
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + r.nummer + '.xml"' }); return res.end(AB.xrechnung(db, r.id));
   }
   if (p === '/api/kunde/abzeichnen' && req.method === 'POST') {
-    const b = await leib(req); const pr = pruefungVoll(b.id); if (!pr || pr.kunde_id !== kid) throw new Fehler(404, 'Prüfbericht nicht gefunden.');
+    const b = await leib(req); const pr = pruefungVoll(b.id); if (!pr || pr.kunde_id !== kid || !PB.sichtbar(db, pr)) throw new Fehler(404, 'Prüfbericht nicht gefunden.');
     db.prepare("UPDATE pruefung SET abgezeichnet_von = ?, abgezeichnet_am = datetime('now','localtime') WHERE id = ?").run(ich.name, pr.id); return json(res, 200, { ok: true });
   }
   throw new Fehler(404, 'unbekannter Pfad');
@@ -463,9 +569,14 @@ async function bueroApi(req, res, p, q, ich) {
     const b = await leib(req); const r = db.prepare('SELECT objekt_id FROM raum WHERE id = ?').get(Number(b.raum_id));
     if (!r || !b.taetigkeit_id) throw new Fehler(400, 'Raum und Tätigkeit nötig');
     const turnus = String(b.turnus || '').trim();
+    // Leistungen aus dem angenommenen Angebot sind gesperrt — ändern nur ausdrücklich als Nachtrag (mit Datum)
+    const alt = db.prepare('SELECT quelle, turnus FROM lv_position WHERE raum_id = ? AND taetigkeit_id = ?').get(Number(b.raum_id), Number(b.taetigkeit_id));
+    if (alt && alt.quelle === 'angebot' && alt.turnus !== turnus && !b.nachtrag) throw new Fehler(409, 'Diese Leistung stammt aus dem angenommenen Angebot (Turnus „' + alt.turnus + '").');
     if (!turnus) { db.prepare('DELETE FROM lv_position WHERE raum_id = ? AND taetigkeit_id = ?').run(Number(b.raum_id), Number(b.taetigkeit_id)); return json(res, 200, { ok: true, entfernt: true }); }
     const regel = T.lesen(turnus); if (regel.art === 'unbekannt') throw new Fehler(400, regel.text);
-    db.prepare('INSERT INTO lv_position (objekt_id, raum_id, taetigkeit_id, turnus) VALUES (?,?,?,?) ON CONFLICT(raum_id, taetigkeit_id) DO UPDATE SET turnus = excluded.turnus').run(r.objekt_id, Number(b.raum_id), Number(b.taetigkeit_id), turnus);
+    const quelle = (alt && alt.quelle === 'angebot' && alt.turnus !== turnus) || b.nachtrag ? 'nachtrag' : (alt ? alt.quelle || 'buero' : 'buero');
+    db.prepare("INSERT INTO lv_position (objekt_id, raum_id, taetigkeit_id, turnus, quelle) VALUES (?,?,?,?,?) ON CONFLICT(raum_id, taetigkeit_id) DO UPDATE SET turnus = excluded.turnus, quelle = excluded.quelle, geaendert_am = datetime('now','localtime')")
+      .run(r.objekt_id, Number(b.raum_id), Number(b.taetigkeit_id), turnus, quelle);
     return json(res, 200, { ok: true, regel: regel.text });
   }
   if (p === '/api/import' && req.method === 'POST') {
@@ -561,13 +672,104 @@ async function bueroApi(req, res, p, q, ich) {
     db.prepare("INSERT INTO erledigung (position_id, datum, mitarbeiter_id, notiz) VALUES (?,?,?,?) ON CONFLICT(position_id, datum) DO NOTHING").run(pos, datum, b.mitarbeiter ? Number(b.mitarbeiter) : null, 'im Büro nachgetragen von ' + ich.name);
     return json(res, 200, { ok: true });
   }
+  // --- Mängel und Reklamationen als Ticket (Zuweisung, Stand, Verlauf, Entscheidung, Nachkontrolle)
+  if (p === '/api/mangel' && req.method === 'GET') {
+    const m = TK.holen(db, q.get('id')); if (!m) throw new Fehler(404, 'Ticket nicht gefunden');
+    if (q.get('objekt') && Number(q.get('objekt')) !== m.objekt_id) throw new Fehler(403, 'Für dieses Objekt bist du nicht zuständig.');
+    return json(res, 200, Object.assign(m, { kandidaten: TK.kandidaten(db, m.objekt_id), stände: TK.STAND, entscheidungen: TK.ENTSCHEIDUNG, prioritaeten: TK.PRIO, bereiche: TK.BEREICHE }));
+  }
   if (p === '/api/mangel' && req.method === 'POST') {
     const b = await leib(req);
-    if (b.id && b.erledigt) { db.prepare("UPDATE mangel SET status='erledigt', erledigt_am=datetime('now','localtime') WHERE id=?").run(Number(b.id)); return json(res, 200, { ok: true }); }
+    if (b.id) {
+      const m = db.prepare('SELECT * FROM mangel WHERE id = ?').get(Number(b.id)); if (!m) throw new Fehler(404, 'Ticket nicht gefunden');
+      if (b.objekt_id != null && Number(b.objekt_id) !== m.objekt_id) throw new Fehler(403, 'Das Ticket gehört zu einem anderen Objekt.');
+      if (R.nurEigeneObjekte(ich.benutzer) && b.objekt_id == null) throw new Fehler(400, 'Objekt fehlt');   // Objektleiter: Objekt muss mitkommen (Rechteprüfung)
+      try {
+        if (b.erledigt) TK.erledigen(db, m.id, { wer: ich.name, notiz: b.notiz });
+        else if (b.zuweisen !== undefined) { const k = TK.zuweisen(db, m.id, b.zuweisen ? Number(b.zuweisen) : null, ich.name); if (k) PUSH.nebenbei(db, k.id, { titel: 'Neues Ticket', text: (db.prepare('SELECT name FROM objekt WHERE id = ?').get(m.objekt_id) || {}).name + ': ' + m.text.slice(0, 140), url: '/app' }); }
+        else if (b.stand) TK.standSetzen(db, m.id, b.stand, ich.name);
+        else if (b.kommentar) TK.verlauf(db, m.id, ich.name, 'kommentar', String(b.kommentar).trim(), !!b.oeffentlich);
+        else if (b.entscheidung !== undefined) TK.entscheiden(db, m.id, b.entscheidung, b.verursacher, ich.name);
+        else if (b.geprueft) TK.pruefen(db, m.id, ich.name);
+        else if (b.oeffnen) TK.wiederOeffnen(db, m.id, ich.name, b.grund);
+        else if (b.prioritaet || b.frist || b.bereich) { db.prepare('UPDATE mangel SET prioritaet = COALESCE(?, prioritaet), frist = COALESCE(?, frist), bereich = COALESCE(?, bereich) WHERE id = ?').run(TK.PRIO[b.prioritaet] ? b.prioritaet : null, /^\d{4}-\d{2}-\d{2}$/.test(b.frist || '') ? b.frist : null, TK.BEREICHE.indexOf(b.bereich) >= 0 ? b.bereich : null, m.id); }
+        else throw new Error('Nichts zu ändern');
+      } catch (e) { throw new Fehler(400, e.message); }
+      return json(res, 200, { ok: true });
+    }
     if (!b.objekt_id || !String(b.text || '').trim()) throw new Fehler(400, 'Objekt und Beschreibung nötig');
-    return json(res, 200, { ok: true, id: Number(db.prepare('INSERT INTO mangel (objekt_id, raum_id, text, quelle, gemeldet_von, frist) VALUES (?,?,?,?,?,?)').run(Number(b.objekt_id), b.raum_id || null, String(b.text).trim(), 'buero', ich.name, b.frist || new Date(Date.now() + 86400000).toISOString().slice(0, 10)).lastInsertRowid) });
+    let id; try { id = TK.anlegen(db, { objekt_id: b.objekt_id, raum_id: b.raum_id, text: b.text, frist: b.frist, prioritaet: b.prioritaet, bereich: b.bereich, quelle: 'buero', gemeldet_von: ich.name }); } catch (e) { throw new Fehler(400, e.message); }
+    if (b.zuweisen) { try { const k = TK.zuweisen(db, id, Number(b.zuweisen), ich.name); if (k) PUSH.nebenbei(db, k.id, { titel: 'Neues Ticket', text: String(b.text).trim().slice(0, 140), url: '/app' }); } catch (e) { throw new Fehler(400, e.message); } }
+    return json(res, 200, { ok: true, id: id });
   }
-  if (p === '/api/maengel') return json(res, 200, db.prepare(`SELECT m.*, o.name objekt, r.name raum FROM mangel m JOIN objekt o ON o.id = m.objekt_id LEFT JOIN raum r ON r.id = m.raum_id WHERE m.status = ? ORDER BY m.id DESC`).all(q.get('status') || 'offen'));
+  if (p === '/api/maengel') return json(res, 200, TK.liste(db, { status: q.get('status') || 'offen', objekt: q.get('objekt') }));
+  if (p === '/api/maengel/auswertung') { const von = q.get('von') || heute().slice(0, 8) + '01', bis = q.get('bis') || heute(); return json(res, 200, { von: von, bis: bis, objekte: TK.auswertung(db, von, bis) }); }
+  // --- Objektportal (QR) je Objekt
+  if (p === '/api/objekt/portal' && req.method === 'GET') { const s = PORTAL.stand(db, q.get('id')); if (!s) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, Object.assign(s, { link: s.token ? basisVon(req) + '/o/' + s.token : null })); }
+  if (p === '/api/objekt/portal' && req.method === 'POST') { const b = await leib(req); let s; try { s = PORTAL.setzen(db, b.id, b); } catch (e) { throw new Fehler(404, e.message); } return json(res, 200, Object.assign(s, { link: s.token ? basisVon(req) + '/o/' + s.token : null })); }
+  if (p === '/api/objekt/portal-qr') {
+    const s = PORTAL.stand(db, q.get('id')); if (!s || !s.token) throw new Fehler(404, 'Portal ist für dieses Objekt noch nicht eingeschaltet');
+    const svg = await QR.toString(basisVon(req) + '/o/' + s.token, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#022c22', light: '#ffffff' } });
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' }); return res.end(svg);
+  }
+  // --- Leistungsnachweis je Monat (Ansicht, PDF) und Anlagen je Objekt
+  if (p === '/api/nachweis' || p === '/api/nachweis.pdf') {
+    const m = q.get('monat') || heute().slice(0, 7);
+    try {
+      if (p === '/api/nachweis') return json(res, 200, NW.monat(db, q.get('objekt'), m));
+      const d = await NW.pdf(db, q.get('objekt'), m); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="' + d.name + '"', 'Cache-Control': 'no-store' }); return res.end(d.buf);
+    } catch (e) { throw new Fehler(400, e.message); }
+  }
+  if (p === '/api/anlagen') { const o = db.prepare('SELECT id, nachweis_anhaengen FROM objekt WHERE id = ?').get(Number(q.get('objekt'))); if (!o) throw new Fehler(404, 'Objekt nicht gefunden'); return json(res, 200, { nachweis_anhaengen: o.nachweis_anhaengen !== 0, anlagen: NW.anlagen(db, o.id), arten: NW.ARTEN }); }
+  if (p === '/api/anlage/datei') {
+    const a = NW.anlageDatei(db, q.get('id')); if (!a || (q.get('objekt') && Number(q.get('objekt')) !== a.objekt_id)) throw new Fehler(404, 'Anlage nicht gefunden');
+    if (R.nurEigeneObjekte(ich.benutzer) && !q.get('objekt')) throw new Fehler(400, 'Objekt fehlt');
+    res.writeHead(200, { 'Content-Type': a.typ || 'application/octet-stream', 'Content-Disposition': 'inline; filename="' + a.dateiname + '"', 'Cache-Control': 'no-store' }); return fs.createReadStream(a.pfad).pipe(res);
+  }
+  if (p === '/api/anlage' && req.method === 'POST') {
+    const b = await leib(req); if (!b.objekt_id) throw new Fehler(400, 'Objekt fehlt');
+    if (b.nachweis_anhaengen != null) { db.prepare('UPDATE objekt SET nachweis_anhaengen = ? WHERE id = ?').run(b.nachweis_anhaengen ? 1 : 0, Number(b.objekt_id)); return json(res, 200, { ok: true }); }
+    if (b.id) { const a = db.prepare('SELECT objekt_id FROM objekt_anlage WHERE id = ?').get(Number(b.id)); if (!a || a.objekt_id !== Number(b.objekt_id)) throw new Fehler(404, 'Anlage nicht gefunden'); }
+    try { return json(res, 200, Object.assign({ ok: true }, NW.anlageSpeichern(db, b))); } catch (e) { throw new Fehler(400, e.message); }
+  }
+  // --- Angenommenes Angebot aus dem Vertrieb übernehmen (Objekt, Räume, LV gesperrt) — Vorschau, dann Übernahme
+  if (p === '/api/angebot/vorschau' || (p === '/api/angebot/uebernehmen' && req.method === 'POST')) {
+    if (R.nurEigeneObjekte(ich.benutzer)) throw new Fehler(403, 'Objekte legt der Planer an.');
+    const b = req.method === 'POST' ? await leib(req) : { nummer: q.get('nummer') };
+    let a; try { a = await ANG.abholen(ich.benutzer, b.nummer); } catch (e) { throw new Fehler(400, e.message); }
+    if (p === '/api/angebot/vorschau') return json(res, 200, ANG.vorschau(db, a));
+    try { const r = ANG.uebernehmen(db, a, { trotzdem: !!b.trotzdem, monatspreis: !!b.monatspreis, name: b.name }); return json(res, 200, Object.assign({ ok: true }, r)); }
+    catch (e) { throw new Fehler(e.code || 400, e.message); }
+  }
+  // --- Mailversand: Stand und Protokoll
+  if (p === '/api/mail/status') return json(res, 200, MAIL.status(db));
+  if (p === '/api/mail/protokoll') return json(res, 200, MAIL.protokoll(db, { anlass: q.get('anlass'), bezug_id: q.get('bezug') }));
+  // Leistungsnachweis an den Kunden mailen (Entwurf ansehen → Büro gibt mit „Senden" frei)
+  if (p === '/api/nachweis/mail-entwurf' || (p === '/api/nachweis/mail' && req.method === 'POST')) {
+    const b = req.method === 'POST' ? await leib(req) : { objekt_id: q.get('objekt'), monat: q.get('monat') };
+    const o = db.prepare('SELECT o.*, k.name kunde, k.email kemail, k.rechnung_email, k.ansprechpartner FROM objekt o LEFT JOIN kunde k ON k.id = o.kunde_id WHERE o.id = ?').get(Number(b.objekt_id)); if (!o) throw new Fehler(404, 'Objekt nicht gefunden');
+    const m = /^\d{4}-\d{2}$/.test(b.monat || '') ? b.monat : heute().slice(0, 7);
+    const entwurf = { an: o.ap_email || o.kemail || o.rechnung_email || '', betreff: 'Leistungsnachweis ' + NW.monatText(m) + ' – ' + o.name, text: (o.ansprechpartner ? 'Guten Tag ' + o.ansprechpartner + ',' : 'Sehr geehrte Damen und Herren,') + '\n\nanbei erhalten Sie den Leistungsnachweis für ' + o.name + ' im ' + NW.monatText(m) + '. Darin sehen Sie je Reinigungstag, welche Leistungen erledigt wurden.\n\nBei Fragen melden Sie sich gerne.', anhaenge: ['Leistungsnachweis ' + NW.monatText(m) + '.pdf'], schon: MAIL.schonGesendet(db, 'nachweis', o.id, m) };
+    if (req.method !== 'POST') return json(res, 200, entwurf);
+    const d = await NW.pdf(db, o.id, m);
+    try { return json(res, 200, await MAIL.senden(db, { anlass: 'nachweis', bezug_id: o.id, bezug: m, an: b.an, cc: b.cc, betreff: b.betreff, text: b.text, anhaenge: [{ name: d.name, inhalt: d.buf }], erneut: !!b.erneut }, ich.name)); }
+    catch (e) { throw new Fehler(e.schon ? 409 : 400, e.message); }
+  }
+  // Prüfbericht: freigeben (erst dann sieht ihn der Kunde), PDF, mailen
+  if (p === '/api/pruefung/freigeben' && req.method === 'POST') { const b = await leib(req); const pr = db.prepare('SELECT objekt_id FROM pruefung WHERE id = ?').get(Number(b.id)); if (!pr || (b.objekt_id != null && Number(b.objekt_id) !== pr.objekt_id)) throw new Fehler(404, 'Prüfung nicht gefunden'); try { PB.freigeben(db, b.id, ich.name); } catch (e) { throw new Fehler(400, e.message); } return json(res, 200, { ok: true }); }
+  if (p === '/api/pruefung/pdf') { const pr = pruefungVoll(q.get('id')); if (!pr) throw new Fehler(404, 'Prüfung nicht gefunden'); const d = await PB.pdf(db, pr); res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="' + d.name + '"', 'Cache-Control': 'no-store' }); return res.end(d.buf); }
+  if (p === '/api/pruefung/mail-entwurf' || (p === '/api/pruefung/mail' && req.method === 'POST')) {
+    const b = req.method === 'POST' ? await leib(req) : { id: q.get('id') };
+    const pr = pruefungVoll(b.id); if (!pr) throw new Fehler(404, 'Prüfung nicht gefunden');
+    if (!pr.freigegeben_am) throw new Fehler(409, 'Den Prüfbericht bitte zuerst freigeben.');
+    const o = db.prepare('SELECT o.*, k.email kemail, k.ansprechpartner FROM objekt o LEFT JOIN kunde k ON k.id = o.kunde_id WHERE o.id = ?').get(pr.objekt_id);
+    const datum = pr.datum.split('-').reverse().join('.');
+    const entwurf = { an: o.ap_email || o.kemail || '', betreff: 'Prüfbericht Reinigungsqualität ' + o.name + ' vom ' + datum, text: (o.ansprechpartner ? 'Guten Tag ' + o.ansprechpartner + ',' : 'Sehr geehrte Damen und Herren,') + '\n\nanbei erhalten Sie den Prüfbericht unserer Qualitätskontrolle vom ' + datum + ' für ' + o.name + '. Das Ergebnis liegt bei ' + String(Math.round(pr.ergebnis * 10) / 10).replace('.', ',') + ' %. Alle beanstandeten Punkte sind erfasst und werden nachgearbeitet.\n\nBei Fragen melden Sie sich gerne.', anhaenge: ['Prüfbericht ' + datum + '.pdf'], schon: MAIL.schonGesendet(db, 'pruefbericht', pr.id) };
+    if (req.method !== 'POST') return json(res, 200, entwurf);
+    const d = await PB.pdf(db, pr);
+    try { const r = await MAIL.senden(db, { anlass: 'pruefbericht', bezug_id: pr.id, an: b.an, cc: b.cc, betreff: b.betreff, text: b.text, anhaenge: [{ name: d.name, inhalt: d.buf }], erneut: !!b.erneut }, ich.name); db.prepare("UPDATE pruefung SET versendet_am = datetime('now','localtime') WHERE id = ?").run(pr.id); return json(res, 200, r); }
+    catch (e) { throw new Fehler(e.schon ? 409 : 400, e.message); }
+  }
   // --- Zeiten
   if (p === '/api/zeiten' || p === '/api/zeiten.csv') {
     const von = q.get('von') || heute().slice(0, 8) + '01', bis = q.get('bis') || heute();
@@ -604,7 +806,7 @@ async function bueroApi(req, res, p, q, ich) {
   }
   // --- Qualitätsprüfung
   if (p === '/api/pruefung' && req.method === 'GET') { const pr = pruefungVoll(q.get('id')); if (!pr) throw new Fehler(404, 'Prüfung nicht gefunden'); return json(res, 200, pr); }
-  if (p === '/api/pruefungen') return json(res, 200, db.prepare('SELECT p.id, p.datum, p.pruefer, p.ergebnis, p.stichprobe, p.geprueft, p.abgezeichnet_von, o.name objekt, o.id objekt_id FROM pruefung p JOIN objekt o ON o.id = p.objekt_id ORDER BY p.datum DESC, p.id DESC LIMIT 100').all());
+  if (p === '/api/pruefungen') return json(res, 200, db.prepare('SELECT p.id, p.datum, p.pruefer, p.ergebnis, p.stichprobe, p.geprueft, p.abgezeichnet_von, p.freigegeben_am, p.versendet_am, o.name objekt, o.id objekt_id FROM pruefung p JOIN objekt o ON o.id = p.objekt_id ORDER BY p.datum DESC, p.id DESC LIMIT 100').all());
   if (p === '/api/pruefung' && req.method === 'POST') {
     const b = await leib(req); const raeume = db.prepare('SELECT * FROM raum WHERE objekt_id = ? ORDER BY reihenfolge, id').all(Number(b.objekt_id));
     if (!raeume.length) throw new Fehler(400, 'Das Objekt hat keine Räume.');
@@ -649,8 +851,9 @@ async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/vorschlaege') return json(res, 200, EINS.vorschlaege(db, q.get('objekt'), q.get('datum') || heute()));
   if (p === '/api/vertretung' && req.method === 'POST') {
     const b = await leib(req); if (!b.objekt_id || !b.mitarbeiter_id) throw new Fehler(400, 'Objekt und Mitarbeiter nötig');
-    db.prepare('INSERT OR IGNORE INTO vertretung (objekt_id, datum, fuer_id, mitarbeiter_id) VALUES (?,?,?,?)').run(Number(b.objekt_id), b.datum || heute(), b.fuer_id || null, Number(b.mitarbeiter_id));
-    return json(res, 200, { ok: true });
+    const neu = db.prepare('INSERT OR IGNORE INTO vertretung (objekt_id, datum, fuer_id, mitarbeiter_id) VALUES (?,?,?,?)').run(Number(b.objekt_id), b.datum || heute(), b.fuer_id || null, Number(b.mitarbeiter_id)).changes;
+    if (neu) { const o = db.prepare('SELECT name FROM objekt WHERE id = ?').get(Number(b.objekt_id)) || {}; const d = String(b.datum || heute()); PUSH.nebenbei(db, Number(b.mitarbeiter_id), { titel: 'Vertretung gesucht', text: (o.name || 'Objekt') + ' am ' + d.slice(8, 10) + '.' + d.slice(5, 7) + '. — kannst du einspringen?', url: '/app' }); }
+    return json(res, 200, { ok: true, push: neu ? PUSH.aktiv(db, Number(b.mitarbeiter_id)) : null });
   }
   // --- Dienstplan
   if (p === '/api/dienstplan') { const m = q.get('montag'); if (!/^\d{4}-\d{2}-\d{2}$/.test(m || '')) throw new Fehler(400, 'Montag fehlt'); return json(res, 200, DP.woche(db, m)); }
@@ -780,6 +983,26 @@ async function bueroApi(req, res, p, q, ich) {
   if (p === '/api/rechnung/xrechnung') {
     let xml; try { xml = AB.xrechnung(db, q.get('id')); } catch (e) { throw new Fehler(400, e.message); }
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': 'attachment; filename="XRechnung_' + AB.voll(db, q.get('id')).nummer + '.xml"' }); return res.end(xml);
+  }
+  // Rechnung per Mail: Entwurf ansehen, Büro gibt mit „Senden" frei. Anhänge baut der Server selbst (Rechnung, bei XRechnung-Kunden
+  // zusätzlich das XML, Leistungsnachweis je Objekt und die Anlagen „automatisch mitsenden"). Nie zweimal ohne „erneut senden".
+  if (p === '/api/rechnung/mail-entwurf' || (p === '/api/rechnung/mail' && req.method === 'POST')) {
+    const b = req.method === 'POST' ? await leib(req) : { id: q.get('id') };
+    const r = AB.voll(db, b.id); if (!r) throw new Fehler(404, 'Rechnung nicht gefunden');
+    if (r.status === 'entwurf' || !r.nummer) throw new Fehler(409, 'Ein Entwurf geht nicht raus — bitte zuerst stellen.');
+    const k = db.prepare('SELECT * FROM kunde WHERE id = ?').get(r.kunde_id) || {}, e = DB.einstellungen(db);
+    const obj = r.objekt_id ? (db.prepare('SELECT name FROM objekt WHERE id = ?').get(r.objekt_id) || {}).name : null;
+    const anh = await NW.fuerRechnung(db, r, req.method !== 'POST');   // Entwurf: nur die Namen, Senden: die echten Dateien
+    const art = r.storno_von ? 'Stornorechnung' : 'Rechnung';
+    const entwurf = { an: k.rechnung_email || k.email || '', betreff: art + ' ' + r.nummer + (obj ? ' – ' + obj : '') + ' – ' + (e.firma_name || 'StaffClean GmbH'),
+      text: (k.ansprechpartner ? 'Guten Tag ' + k.ansprechpartner + ',' : 'Sehr geehrte Damen und Herren,') + '\n\nanbei erhalten Sie unsere ' + art + ' ' + r.nummer + ' vom ' + String(r.datum || '').split('-').reverse().join('.') + ' über ' + (Number(r.brutto) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' € für den Zeitraum ' + r.zeitraum_von.split('-').reverse().join('.') + ' bis ' + r.zeitraum_bis.split('-').reverse().join('.') + '.' +
+        (anh.some(function (a) { return a.art === 'leistungsnachweis'; }) ? '\nDen Leistungsnachweis für den Zeitraum haben wir beigefügt.' : '') + '\n\nBei Fragen zur Rechnung melden Sie sich gerne.',
+      anhaenge: [(r.storno_von ? 'Stornorechnung_' : 'Rechnung_') + r.nummer + '.pdf'].concat(k.rechnungsformat === 'xrechnung' ? ['XRechnung_' + r.nummer + '.xml'] : []).concat(anh.map(function (a) { return a.name; })), schon: MAIL.schonGesendet(db, 'rechnung', r.id) };
+    if (req.method !== 'POST') return json(res, 200, entwurf);
+    const liste = [{ name: entwurf.anhaenge[0], inhalt: await PDFR.erzeugen(db, r), typ: 'application/pdf' }];
+    if (k.rechnungsformat === 'xrechnung') liste.push({ name: 'XRechnung_' + r.nummer + '.xml', inhalt: Buffer.from(AB.xrechnung(db, r.id), 'utf8'), typ: 'application/xml' });
+    try { return json(res, 200, await MAIL.senden(db, { anlass: 'rechnung', bezug_id: r.id, an: b.an, cc: b.cc, betreff: b.betreff, text: b.text, anhaenge: liste.concat(anh), erneut: !!b.erneut }, ich.name)); }
+    catch (x) { throw new Fehler(x.schon ? 409 : 400, x.message); }
   }
   if (p.startsWith('/api/rechnung/') && req.method === 'POST') {
     const b = await leib(req);
@@ -1000,15 +1223,16 @@ function fotoErlaubt(ich, datei) {
   if (!ich) return false; if (ich.rolle === 'buero') return true;
   const c = datei.match(/^c(\d+)-/);   // Chatbild: wer den Kanal sehen darf, sieht das Bild
   if (c) { if (ich.rolle !== 'mitarbeiter') return false; const k = db.prepare('SELECT * FROM kanal WHERE id = ?').get(Number(c[1])); return !!k && (k.art === 'direkt' ? k.schluessel.split(':').indexOf('m' + ich.mitarbeiter.id) > 0 : !!k.app); }
-  const m = datei.match(/^[fmk](\d+)-/); if (!m) return false;
+  const m = datei.match(/^[fmkp](\d+)-/); if (!m) return false;   // p = Foto aus dem Objektportal (Objekt-Nummer)
   let oid = null;
   if (datei[0] === 'f') { const p = db.prepare('SELECT objekt_id FROM lv_position WHERE id = ?').get(Number(m[1])); oid = p && p.objekt_id; } else oid = Number(m[1]);
   if (!oid) return false;
   if (ich.rolle === 'kunde') return !!db.prepare('SELECT 1 FROM objekt WHERE id = ? AND kunde_id = ?').get(oid, ich.kunde_id);
-  return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id);
+  return !!db.prepare('SELECT 1 FROM einsatz WHERE objekt_id = ? AND mitarbeiter_id = ?').get(oid, ich.mitarbeiter.id)
+    || !!db.prepare('SELECT 1 FROM mangel WHERE objekt_id = ? AND zustaendig_id = ?').get(oid, ich.mitarbeiter.id);   // zugewiesenes Ticket: Fotos dazu sehen
 }
 
-const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einladung': 'einladung.html', '/einrichten': 'einrichten.html', '/drucken/report': 'drucken-report.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
+const SEITEN = { '/': 'index.html', '/app': 'app.html', '/kunde': 'kunde.html', '/gestaltung': 'gestaltung.html', '/anmelden': 'anmelden.html', '/einladung': 'einladung.html', '/einrichten': 'einrichten.html', '/drucken/report': 'drucken-report.html', '/drucken/qr': 'drucken-qr.html', '/drucken/angebot': 'drucken-angebot.html', '/drucken/pruefung': 'drucken-pruefung.html', '/drucken/objekt-qr': 'drucken-objekt-qr.html','/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest' };
 
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://x'); const p = u.pathname, q = u.searchParams;
@@ -1039,6 +1263,8 @@ const server = http.createServer(async function (req, res) {
       if (!ziel) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Die Direktanmeldung in den Vertrieb ist auf diesem Rechner nicht eingerichtet.'); }
       res.writeHead(302, { Location: ziel, 'Cache-Control': 'no-store' }); return res.end();
     }
+    // Objektportal per QR: eine Seite für jeden Schlüssel (die Daten holt sie über /api/o/<schlüssel>)
+    if (/^\/o\/[A-Za-z0-9_-]{20,40}$/.test(p)) { res.writeHead(200, { 'Content-Type': TYPEN['.html'], 'Cache-Control': 'no-cache', 'Referrer-Policy': 'no-referrer' }); return fs.createReadStream(path.join(WEB, 'objekt.html')).pipe(res); }
     if (p.startsWith('/fotos/')) { const name = path.basename(p); const f = path.join(FOTOS, name); if (fotoErlaubt(Z.wer(db, req), name) && fs.existsSync(f)) { res.writeHead(200, { 'Content-Type': TYPEN[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'private, max-age=3600' }); return fs.createReadStream(f).pipe(res); } res.writeHead(404); return res.end(); }
     if (p === '/js/jsQR.js') { res.writeHead(200, { 'Content-Type': TYPEN['.js'] }); return fs.createReadStream(path.join(__dirname, 'node_modules', 'jsqr', 'dist', 'jsQR.js')).pipe(res); }
     const datei = path.join(WEB, SEITEN[p] || path.normalize(p).replace(/^([\\/])+/, ''));
@@ -1070,6 +1296,8 @@ function sicherung() {
 if (require.main === module) {
   server.listen(PORT, HOST, function () { console.log('Glanzwerk läuft: http://' + HOST + ':' + PORT + '  ·  App /app  ·  Kunde /kunde' + (HINTER_PROXY ? '  ·  hinter Webserver' : '')); einrichtungscodePruefen(); });
   automatik(); setInterval(automatik, 30 * 60000).unref();
+  // Nachbesetzung: Alarme des Tages (niemand da, Vertretung offen) einmal je Objekt an die Objektleitung (Kanal + Push)
+  setInterval(function () { try { const g = KRANK.eskalieren(db); if (g.length) console.log('Alarm gemeldet: ' + g.map(function (x) { return x.objekt + ' – ' + x.alarm; }).join(' · ')); } catch (e) { console.error('Eskalation fehlgeschlagen:', e.message); } }, 10 * 60000).unref();
   sicherung(); setInterval(sicherung, 60 * 60000).unref();   // stündlich nachsehen, einmal je Tag schreiben
 }
 module.exports = { server, db };

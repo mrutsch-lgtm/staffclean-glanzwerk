@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#022c22">
+<meta name="robots" content="noindex, nofollow">
+<title>Objektportal · StaffClean</title>
+<link rel="icon" href="/bilder/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/bilder/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/stil.css">
+<style>
+  .portal-verlauf { display: grid; gap: .45rem; margin-top: .6rem; }
+  .portal-verlauf div { font-size: .9rem; padding: .45rem .7rem; border-radius: 10px; background: var(--grau-50, #f4f6f5); }
+  .portal-verlauf div.kunde { background: var(--gruen-50); }
+  .portal-fotos { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
+  .portal-fotos img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid var(--linie); }
+  .tag-zeile { display: flex; justify-content: space-between; gap: .6rem; align-items: center; }
+  details.karte summary { cursor: pointer; list-style: none; }
+  details.karte summary::-webkit-details-marker { display: none; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="app-kopf"><button class="zurueck" id="zurueck" hidden aria-label="Zurück">‹</button><img class="logo-firma" src="/bilder/logo-hell.webp" alt="StaffClean" id="logo"><div class="titel" id="apptitel"></div></header>
+  <main class="app-inhalt" id="app"><div class="karte leer">Einen Moment …</div></main>
+  <input type="file" id="foto" accept="image/*" capture="environment" hidden>
+</div>
+<script src="/js/ui.js"></script>
+<script src="/js/objekt.js"></script>
+</body>
+</html>
